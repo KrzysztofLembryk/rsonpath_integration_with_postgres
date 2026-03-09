@@ -66,7 +66,6 @@ fn rsonpath_ext(query: &str, json_str: &str) -> String
         .map(|val| serde_json::from_slice(val.bytes()).unwrap())
         .collect();
 
-    // return as a pretty-printed JSON array
     return serde_json::to_string_pretty(&values).unwrap();
 
     // return format!("rsonpath_postgres_ext, engine.count result: {:?}", res);
