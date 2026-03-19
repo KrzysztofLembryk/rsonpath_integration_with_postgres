@@ -2,73 +2,93 @@ use pgrx::prelude::*;
 
 ::pgrx::pg_module_magic!(name, version);
 
-use std::fmt::Display;
 use rsonpath::input::BorrowedBytes;
+use rsonpath::result::Match;
 use rsonpath::{
     engine::{Compiler, Engine, RsonpathEngine},
-    result::Sink,
 };
+use pgrx::iter::TableIterator;
 
-
-pub struct SinkVec<D>
-{
-    pub data: Vec<D>,
-}
-
-impl<D> SinkVec<D> {
-    pub fn new() -> SinkVec<D> {
-        SinkVec {
-            data: vec![],
-        }
-    }
-}
-
-
-impl<D> Sink<D> for SinkVec<D>
-where
-    D: Display,
-{
-    type Error = std::convert::Infallible;
-
-    #[inline(always)]
-    fn add_match(&mut self, data: D) -> Result<(), Self::Error> {
-        self.data.push(data);
-        Ok(())
-    }
-}
 
 
 #[pg_extern]
 fn rsonpath_ext(query: &str, json_str: &str) -> String 
 {
-    // TODO: add handling errors correctly
-    let query = rsonpath_syntax
-        ::parse(query)
-            .expect("got query parse error");
-    let input = BorrowedBytes::new(json_str.as_bytes());
-    let engine = RsonpathEngine::compile_query(&query)
-        .expect("engine compile err");
-    let mut sink_vec = SinkVec::new();
+    let sink_vec = run_qeury(query, json_str);
 
-    engine.matches(&input, &mut sink_vec)
-        .expect("Engine count error");
-
-    // let mut res = vec![];
-
-    // for val in &sink_vec.data
-    // {
-    //     res.push(String::from_utf8_lossy(val.bytes()));
-    // }
-
-    let values: Vec<serde_json::Value> = sink_vec.data.iter()
+    let values: Vec<serde_json::Value> = sink_vec.iter()
         .map(|val| serde_json::from_slice(val.bytes()).unwrap())
         .collect();
 
     return serde_json::to_string_pretty(&values).unwrap();
-
-    // return format!("rsonpath_postgres_ext, engine.count result: {:?}", res);
 }
 
+#[pg_extern]
+fn rsonpath_ext_table_iter_str(
+    query: &str,
+    json_str: &str,
+) -> TableIterator<'static, (name!(idx, i64), name!(val, String))> 
+{
+    let sink_vec = run_qeury(query, json_str);
+
+    let results: Vec<(i64, String)> = sink_vec.into_iter()
+        .enumerate()
+        .map(|(i, val)| (i as i64, String::from_utf8_lossy(val.bytes()).into_owned()))
+        .collect();
+
+    TableIterator::new(results)
+}
+
+#[pg_extern]
+fn rsonpath_ext_table_iter_json(
+    query: &str, 
+    json_str: &str
+) -> TableIterator<'static, (name!(idx, i64), name!(val, pgrx::Json))> 
+{
+    let sink_vec = run_qeury(query, json_str);
+
+    let results: Vec<(i64, pgrx::Json)> = sink_vec.iter()
+        .enumerate()
+        .map(|(i, val)| {
+            let raw = String::from_utf8_lossy(val.bytes()).into_owned();
+            (i as i64, pgrx::Json(serde_json::from_str(&raw).unwrap()))
+        })
+        .collect();
+
+    return TableIterator::new(results);
+}
+
+#[pg_extern]
+fn rsonpath_ext_table_iter_jsonb(
+    query: &str, 
+    json_str: &str
+) -> TableIterator<'static, (name!(idx, i64), name!(val, pgrx::JsonB))> 
+{
+    let sink_vec = run_qeury(query, json_str);
+
+    let results: Vec<(i64, pgrx::JsonB)> = sink_vec.iter()
+        .enumerate()
+        .map(|(i, val)| {
+            let raw = String::from_utf8_lossy(val.bytes()).into_owned();
+            (i as i64, pgrx::JsonB(serde_json::from_str(&raw).unwrap()))
+        })
+        .collect();
+
+    return TableIterator::new(results);
+}
+
+fn run_qeury(query: &str, json_str: &str) -> Vec<Match>
+{
+    let query = rsonpath_syntax::parse(query).expect("query parse error");
+    let input = BorrowedBytes::new(json_str.as_bytes());
+    let engine = RsonpathEngine::compile_query(&query).expect("engine compile error");
+    let mut sink_vec = Vec::new();
+
+    engine.matches(&input, &mut sink_vec)
+        .expect("Engine count error");
+
+    return sink_vec;
+}
 
 #[cfg(any(test, feature = "pg_test"))]
 #[pg_schema]
@@ -76,6 +96,8 @@ mod tests {
     use pgrx::prelude::*;
     use std::fmt::Write as FmtWrite;
     use std::time::Instant;
+
+    const EXT_NAME: &str = "rsonpath_ext";
 
     const SMALL_JSON: &str = include_str!("../tests/testdata/small.json");
     const MEDIUM_JSON: &str = include_str!("../tests/testdata/medium.json");
@@ -184,7 +206,8 @@ mod tests {
 
     fn build_sql(query: &str, json: &str) -> String {
         format!(
-            "SELECT rsonpath_ext('{}', '{}')",
+            "SELECT {}('{}', '{}')",
+            EXT_NAME,
             escape_sql(query),
             escape_sql(json)
         )
@@ -232,7 +255,7 @@ mod tests {
         )).unwrap();
 
         let results = collect_results(
-            "SELECT rsonpath_ext('$.person.name', data::text) FROM test_json WHERE id = 1"
+            &format!("SELECT {}('$.person.name', data::text) FROM test_json WHERE id = 1", EXT_NAME)
         );
         let got: serde_json::Value = serde_json::from_str(&results[0]).unwrap();
         let want: serde_json::Value = serde_json::from_str(r#"["John"]"#).unwrap();
