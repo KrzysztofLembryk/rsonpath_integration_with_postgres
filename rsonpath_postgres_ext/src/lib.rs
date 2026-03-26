@@ -9,8 +9,6 @@ use rsonpath::{
 };
 use pgrx::iter::TableIterator;
 
-
-
 #[pg_extern]
 fn rsonpath_ext(query: &str, json_str: &str) -> String 
 {
@@ -22,7 +20,9 @@ fn rsonpath_ext(query: &str, json_str: &str) -> String
 
     return serde_json::to_string_pretty(&values).unwrap();
 }
-
+// 1) benchmark dla rsonpath_ext_table_iter_str i rsonpath_ext_table_iter_json
+// plus porownac z operatorem jsonpath w postgresie
+// 2) duzy json np. d3 dataset
 #[pg_extern]
 fn rsonpath_ext_table_iter_str(
     query: &str,
@@ -185,6 +185,55 @@ mod tests {
         },
     ];
 
+    struct LargeTestCase {
+        pub name: &'static str,
+        pub query: &'static str,
+        pub expected: Expected,
+    }
+
+    const TEST_CASES_LARGE: &[LargeTestCase] = &[
+        LargeTestCase {
+            name: "simple_key",
+            query: "$.person.name",
+            expected: Expected::Json(r#"["John"]"#),
+        },
+        LargeTestCase {
+            name: "nested_array_wildcard",
+            query: "$.person.phoneNumbers[*].number",
+            expected: Expected::Json(r#"["111-222-333","123-456-789"]"#),
+        },
+        LargeTestCase {
+            name: "no_match",
+            query: "$.nonexistent",
+            expected: Expected::Json("[]"),
+        },
+        LargeTestCase {
+            name: "array_index",
+            query: "$.person.phoneNumbers[0].type",
+            expected: Expected::Json(r#"["Home"]"#),
+        },
+        LargeTestCase {
+            name: "descendant_search",
+            query: "$..number",
+            expected: Expected::Json(r#"["111-222-333","123-456-789"]"#),
+        },
+        LargeTestCase {
+            name: "all_names",
+            query: "$..name",
+            expected: Expected::Count(25),
+        },
+        LargeTestCase {
+            name: "all_prices",
+            query: "$..price",
+            expected: Expected::Count(12),
+        },
+        LargeTestCase {
+            name: "deep_path",
+            query: "$.store.departments[0].products[0].reviews[0].text",
+            expected: Expected::Json(r#"["Excellent"]"#),
+        },
+    ];
+
     fn escape_sql(s: &str) -> String {
         s.replace('\'', "''")
     }
@@ -204,12 +253,27 @@ mod tests {
         })
     }
 
+    fn run_qeury_discard_results(sql: &str) {
+        Spi::connect(|client| {
+                client.select(sql, None, &[]).expect("SPI query failed");
+        })
+    }
+
     fn build_sql(query: &str, json: &str) -> String {
         format!(
             "SELECT {}('{}', '{}')",
             EXT_NAME,
             escape_sql(query),
             escape_sql(json)
+        )
+    }
+
+    fn build_sql2(ext_name: &str, query: &str, json_path: &str) -> String {
+        format!(
+            "SELECT {}('{}', '{}')",
+            ext_name,
+            escape_sql(query),
+            escape_sql(json_path)
         )
     }
 
@@ -277,6 +341,24 @@ mod tests {
         }
     }
 
+    const RSONPATH_STR: &str = "rsonpath_ext_table_iter_str";
+    const RSONPATH_JSON: &str = "rsonpath_ext_table_iter_json";
+    // #[pg_test]
+    // fn test_correctness_large2(ext_name: &str) {
+    //     let large = load_large_json();
+    //     for test_case in TEST_CASES_LARGE {
+    //         let query = test_case.query;
+    //         let name = test_case.name;
+    //         let sql = build_sql2(ext_name, query, &large);
+    //         let results = collect_results(&sql);
+    //         assert!(!results.is_empty(), "[large {}] got no results", query);
+    //         let got: serde_json::Value = serde_json::from_str(&results[0])
+    //             .unwrap_or_else(|e| panic!("[large {}] bad JSON: {}", query, e));
+    //         let arr = got.as_array()
+    //             .unwrap_or_else(|| panic!("[large {}] expected array", query));
+    //         assert!(!arr.is_empty(), "[large {}] empty result array", query);
+    //     }
+    // }
     // == Performance ==
 
     fn bench(sql: &str, warmup: usize, iters: usize) -> f64 {
@@ -288,6 +370,60 @@ mod tests {
             let _ = collect_results(sql);
         }
         start.elapsed().as_secs_f64() * 1000.0 / iters as f64
+    }
+
+
+    fn bench2(sql: &str, warmup: usize, iters: usize) -> f64 {
+        for _ in 0..warmup {
+            run_qeury_discard_results(sql);
+        }
+        let start = Instant::now();
+        for _ in 0..iters {
+            run_qeury_discard_results(sql);
+        }
+        start.elapsed().as_secs_f64() * 1000.0 / iters as f64
+    }
+
+
+    #[pg_test]
+    fn test_performance_large() {
+        Spi::run("SET client_min_messages = WARNING;").unwrap();
+        let mut report = String::new();
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        writeln!(report, "# perf results (epoch: {})", timestamp).unwrap();
+        writeln!(report, "{:<35} {:>12} {:>10} {:>12}",
+            "Test", "JSON bytes", "Iters", "Avg (ms)").unwrap();
+        writeln!(report, "{}", "-".repeat(73)).unwrap();
+
+        let large = load_large_json();
+        let large_bytes = large.len();
+
+        for test_case in TEST_CASES_LARGE {
+            let query = test_case.query;
+            let name = test_case.name;
+            let sql = build_sql2(RSONPATH_STR, query, &large);
+            let iters = 5;
+            let avg_ms = bench2(&sql, 1, iters);
+            writeln!(report, "{:<35} {:>12} {:>10} {:>12.4}",
+                format!("{}:{}", RSONPATH_STR, name), large_bytes, iters, avg_ms).unwrap();
+        }
+
+        for test_case in TEST_CASES_LARGE {
+            let query = test_case.query;
+            let name = test_case.name;
+            let sql = build_sql2(RSONPATH_JSON, query, &large);
+            let iters = 5;
+            let avg_ms = bench2(&sql, 1, iters);
+            writeln!(report, "{:<35} {:>12} {:>10} {:>12.4}",
+                format!("{}:{}", RSONPATH_JSON, name), large_bytes, iters, avg_ms).unwrap();
+        }
+
+        std::fs::write(PERF_RESULTS_PATH, &report).unwrap_or_else(|e| {
+            panic!("Failed to write perf results to {}: {}", PERF_RESULTS_PATH, e)
+        });
     }
 
     #[pg_test]

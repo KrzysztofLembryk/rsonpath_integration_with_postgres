@@ -85,3 +85,6 @@ SELECT ext.idx, ext.val
 FROM json_table, 
      rsonpath_ext_table_iter_jsonb('$.person.phoneNumbers[*]', data::text) AS ext;
 ```
+
+# BENCHMARK
+- in postgres json field max 1 GB, jsonb max 200MB
