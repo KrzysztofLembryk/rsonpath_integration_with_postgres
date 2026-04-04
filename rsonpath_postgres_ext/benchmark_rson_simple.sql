@@ -59,7 +59,7 @@ BEGIN
 
 
      -- RESULTS for 900MB:
-     -- qeury: $.records[*].name:
+     -- qeury: $.records[*].name,
      -- elapsed_str: 29947.721 ms, 
      -- elapsed_json: 32267.341 ms
 
@@ -76,12 +76,17 @@ BEGIN
      -- elapsed_str: 13391.216 ms, 
      -- elapsed_json: 14489.200 ms
 
+     -- ZMIERZYĆ konwersję json na jsonb
+     -- zmierzyć ile zajmuje jsonpath na jsonb od razu, bez konwersji
+     -- skąd się bierze overhead w rsonpath bo na tych samych danych zapytanie w samym rsonpath zajmuje kilka set miliskeund a nie sekund
+     -- Vkk
 
      -- ################  RESULTS for 90MB ################
      -- qeury: $.records[*].name, 
      -- elapsed_str: 2623.748 ms, 
      -- elapsed_json: 2910.995 ms
      -- jsonpath: 11757.487 ms
+     -- jsonpath_wihtout_jsonb_cast: 4849.070 ms
 
      -- qeury: $.records[*].scores[*], 
      -- elapsed_str: 4894.945 ms, 

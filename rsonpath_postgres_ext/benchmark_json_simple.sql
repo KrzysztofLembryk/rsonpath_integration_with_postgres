@@ -7,8 +7,8 @@ BEGIN
     t0 := clock_timestamp();
 
     SELECT count(*) INTO cnt
-    FROM json_table jt,
-         LATERAL jsonb_path_query(jt.data::jsonb, '$.records[*].scores[*]'::jsonpath) AS r
+    FROM jsonb_table jt,
+         LATERAL jsonb_path_query(jt.data, '$.records[*].name'::jsonpath) AS r
     WHERE jt.id = 2;
 
     ms_native := round((extract(epoch FROM (clock_timestamp() - t0)) * 1000.0)::numeric, 3);

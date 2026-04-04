@@ -13,7 +13,7 @@ import sys
 SEED = 42
 # 4_00000 ~~ 90MB
 # 1_000_000 ~~ 225 MB
-NUM_RECORDS = 1_000_000 
+NUM_RECORDS = 3_00000 
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "large.json")
 

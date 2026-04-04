@@ -93,6 +93,7 @@ fn run_qeury(query: &str, json_str: &str) -> Vec<Match>
 #[cfg(any(test, feature = "pg_test"))]
 #[pg_schema]
 mod tests {
+    // sprawdzic czy maja rzeczy do benchmarkowania w pgrx
     use pgrx::prelude::*;
     use std::fmt::Write as FmtWrite;
     use std::time::Instant;
