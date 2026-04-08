@@ -66,6 +66,16 @@ fn rsonpath_ext_table_iter_jsonb(
     return TableIterator::new(results);
 }
 
+#[pg_extern]
+fn rsonpath_ext_count(query: &str, json_str: &str) -> i64
+{
+    let query = rsonpath_syntax::parse(query).expect("query parse error");
+    let input = BorrowedBytes::new(json_str.as_bytes());
+    let engine = RsonpathEngine::compile_query(&query).expect("engine compile error");
+
+    engine.count(&input).expect("engine count error") as i64
+}
+
 fn run_qeury(query: &str, json_str: &str) -> Vec<Match>
 {
     let query = rsonpath_syntax::parse(query).expect("query parse error");
@@ -89,8 +99,9 @@ mod tests {
 
     const ONE_MB: f64 = (1024 * 1024) as f64;
     const EXTENSIONS: &'static [&'static str] = &[
-        "rsonpath_ext_json" ,
+        "rsonpath_ext_json",
         "rsonpath_ext_str",
+        "rsonpath_ext_count",
         ];
     const SMALL_JSON: &str = include_str!("../tests/testdata/small.json");
     const MEDIUM_JSON: &str = include_str!("../tests/testdata/medium.json");
@@ -244,6 +255,16 @@ mod tests {
                     LATERAL jsonb_path_query(jt.{}, '{}'::jsonpath);
                 ",
                 escape_sql(json_table_name), jsonb_data_col_name, escape_sql(query)
+            );
+        }
+        else if ext_name == "rsonpath_ext_count"
+        {
+            return format!(
+                "
+                SELECT sum(rsonpath_ext_count('{}', jt.{}::text))
+                FROM {} jt;
+                ",
+                escape_sql(query), json_data_col_name, escape_sql(json_table_name)
             );
         }
         else
