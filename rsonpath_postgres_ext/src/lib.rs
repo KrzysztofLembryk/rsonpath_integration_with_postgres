@@ -261,89 +261,96 @@ mod tests {
 
     // == Correctness ==
 
-    // fn check_case(case: &TestCase, ext_name: &str) 
-    // {
-    //     let sql = build_sql(ext_name, case.query, case.json);
-    //     let results = run_sql_query(&sql);
+    // Inline SQL for correctness: returns actual values, not count(*).
+    // Cast to text so it works for str, json, and jsonb return types.
+    fn build_inline_sql(ext_name: &str, query: &str, json: &str) -> String {
+        format!(
+            "SELECT val::text FROM {}('{}', '{}')",
+            ext_name,
+            escape_sql(query),
+            escape_sql(json)
+        )
+    }
 
-    //     match &case.expected {
-    //         Expected::Json(expected_str) => {
-    //             assert!(!results.is_empty(), "[{}] got no results", case.name);
-    //             let got: serde_json::Value = serde_json::from_str(&results[0])
-    //                 .unwrap_or_else(|e| panic!("[{}] bad JSON output: {}", case.name, e));
-    //             let want: serde_json::Value = serde_json::from_str(expected_str)
-    //                 .unwrap_or_else(|e| panic!("[{}] bad JSON expected: {}", case.name, e));
-    //             assert_eq!(got, want, "[{}] mismatch", case.name);
-    //         },
-    //         Expected::Count(n) => {
-    //             assert!(!results.is_empty(), "[{}] got no results", case.name);
-    //             let got: serde_json::Value = serde_json::from_str(&results[0])
-    //                 .unwrap_or_else(|e| panic!("[{}] bad JSON output: {}", case.name, e));
-    //             let arr = got.as_array()
-    //                 .unwrap_or_else(|| panic!("[{}] expected array", case.name));
-    //             assert_eq!(arr.len(), *n, "[{}] count mismatch", case.name);
-    //         },
-    //         Expected::Nothing => {}
-    //     }
-    // }
+    fn check_case(case: &TestCase) {
+        for ext_name in EXTENSIONS {
+            let sql = build_inline_sql(ext_name, case.query, case.json);
+            let results = run_sql_query(&sql);
 
-    // #[pg_test]
-    // fn test_correctness() 
-    // {
-    //     for ext_name in EXTENSIONS.iter()
-    //     {
-    //         for case in TEST_CASES 
-    //         {
-    //             check_case(case, *ext_name);
-    //         }
-    //     }
-    // }
+            match &case.expected {
+                Expected::Json(expected_str) => {
+                    let want: serde_json::Value = serde_json::from_str(expected_str)
+                        .unwrap_or_else(|e| panic!("[{}/{}] bad expected JSON: {}", ext_name, case.name, e));
+                    let want_arr = want.as_array()
+                        .unwrap_or_else(|| panic!("[{}/{}] expected must be a JSON array", ext_name, case.name));
 
-    // #[pg_test]
-    // fn test_correctness_via_table() 
-    // {
-    //     Spi::run("CREATE TABLE test_json (id serial, data json)").unwrap();
-    //     Spi::run(&format!(
-    //         "INSERT INTO test_json (data) VALUES ('{}')",
-    //         escape_sql(SMALL_JSON)
-    //     )).unwrap();
+                    let got: Vec<serde_json::Value> = results.iter()
+                        .map(|r| serde_json::from_str(r)
+                            .unwrap_or_else(|e| panic!("[{}/{}] bad result JSON '{}': {}", ext_name, case.name, r, e)))
+                        .collect();
 
-    //     for ext_name in EXTENSIONS
-    //     {
-    //         let results = run_sql_query(
-    //             &format!("SELECT {}('$.person.name', data::text) FROM test_json WHERE id = 1", ext_name)
-    //         );
-    //         let got: serde_json::Value = serde_json::from_str(&results[0]).unwrap();
-    //         let want: serde_json::Value = serde_json::from_str(r#"["John"]"#).unwrap();
-    //         assert_eq!(got, want);
-    //     }
-    // }
+                    assert_eq!(got.len(), want_arr.len(),
+                        "[{}/{}] result count mismatch: got {}, want {}",
+                        ext_name, case.name, got.len(), want_arr.len());
+                    assert_eq!(got, *want_arr, "[{}/{}] values mismatch", ext_name, case.name);
+                },
+                Expected::Count(n) => {
+                    assert_eq!(results.len(), *n,
+                        "[{}/{}] count mismatch: got {}, want {}",
+                        ext_name, case.name, results.len(), n);
+                },
+                Expected::Nothing => {}
+            }
+        }
+    }
 
-    // #[pg_test]
-    // fn test_correctness_large() 
-    // {
-    //     for json_path in LARGE_JSONS
-    //     {
-    //         let large = load_json(*json_path);
-    //         for ext_name in EXTENSIONS
-    //         {
-    //             for query in &["$..name", "$..city", "$..id"] 
-    //             {
-    //                 let sql = build_sql(*ext_name, query, &large);
-    //                 let results = run_sql_query(&sql);
+    #[pg_test]
+    fn test_correctness() {
+        for case in TEST_CASES {
+            check_case(case);
+        }
+    }
 
-    //                 assert!(!results.is_empty(), "[large {}] got no results", query);
+    #[pg_test]
+    fn test_correctness_via_table() {
+        Spi::run("CREATE TABLE test_json (id serial, data json)").unwrap();
+        Spi::run(&format!(
+            "INSERT INTO test_json (data) VALUES ('{}')",
+            escape_sql(SMALL_JSON)
+        )).unwrap();
 
-    //                 let got: serde_json::Value = serde_json::from_str(&results[0])
-    //                     .unwrap_or_else(|e| panic!("[large {}] bad JSON: {}", query, e));
-    //                 let arr = got.as_array()
-    //                     .unwrap_or_else(|| panic!("[large {}] expected array", query));
+        for ext_name in EXTENSIONS {
+            let sql = format!(
+                "SELECT val::text FROM {}('$.person.name', (SELECT data::text FROM test_json WHERE id = 1))",
+                ext_name
+            );
+            let results = run_sql_query(&sql);
+            assert_eq!(results.len(), 1, "[{}/via_table] expected 1 result", ext_name);
+            let got: serde_json::Value = serde_json::from_str(&results[0]).unwrap();
+            let want: serde_json::Value = serde_json::from_str("\"John\"").unwrap();
+            assert_eq!(got, want, "[{}/via_table] mismatch", ext_name);
+        }
+    }
 
-    //                 assert!(!arr.is_empty(), "[large {}] empty result array", query);
-    //             }
-    //         }
-    //     }
-    // }
+    #[pg_test]
+    fn test_correctness_large() {
+        for json_path in LARGE_JSONS {
+            let large = load_json(json_path);
+            for ext_name in EXTENSIONS {
+                for (query, min_expected) in &[
+                    ("$..name", 1000),
+                    ("$..city", 1000),
+                    ("$..id", 1000),
+                ] {
+                    let sql = build_inline_sql(ext_name, query, &large);
+                    let results = run_sql_query(&sql);
+                    assert!(results.len() >= *min_expected,
+                        "[{}/large/{}] expected >= {} results, got {}",
+                        ext_name, query, min_expected, results.len());
+                }
+            }
+        }
+    }
 
     // == Performance ==
 
