@@ -2,6 +2,7 @@ use pgrx::prelude::*;
 
 ::pgrx::pg_module_magic!(name, version);
 
+use std::time::Instant;
 use rsonpath::input::BorrowedBytes;
 use rsonpath::result::Match;
 use rsonpath::{
@@ -9,9 +10,6 @@ use rsonpath::{
 };
 use pgrx::iter::TableIterator;
 
-// 1) benchmark dla rsonpath_ext_table_iter_str i rsonpath_ext_table_iter_json
-// plus porownac z operatorem jsonpath w postgresie
-// 2) duzy json np. d3 dataset
 #[pg_extern]
 fn rsonpath_ext_str(
     query: &str,
@@ -24,6 +22,30 @@ fn rsonpath_ext_str(
         .enumerate()
         .map(|(i, val)| (i as i64, String::from_utf8_lossy(val.bytes()).into_owned()))
         .collect();
+
+    TableIterator::new(results)
+}
+
+#[pg_extern]
+fn rsonpath_ext_str_timed(
+    query: &str,
+    json_str: &str,
+) -> TableIterator<'static, (name!(idx, i64), name!(val, String))> 
+{
+    let now = Instant::now();
+    let sink_vec = run_qeury(query, json_str);
+    let elapsed_run_query = now.elapsed();
+
+    pgrx::notice!("rsonpath took: {:?}", elapsed_run_query);
+
+    let now = Instant::now();
+    let results: Vec<(i64, String)> = sink_vec.into_iter()
+        .enumerate()
+        .map(|(i, val)| (i as i64, String::from_utf8_lossy(val.bytes()).into_owned()))
+        .collect();
+    let elapsed_aggregate_results = now.elapsed();
+
+    pgrx::notice!("results aggregation took: {:?}", elapsed_aggregate_results);
 
     TableIterator::new(results)
 }
@@ -43,6 +65,34 @@ fn rsonpath_ext_json(
             (i as i64, pgrx::Json(serde_json::from_str(&raw).unwrap()))
         })
         .collect();
+
+    return TableIterator::new(results);
+}
+
+
+#[pg_extern]
+fn rsonpath_ext_json_timed(
+    query: &str, 
+    json_str: &str
+) -> TableIterator<'static, (name!(idx, i64), name!(val, pgrx::Json))> 
+{
+    let now = Instant::now();
+    let sink_vec = run_qeury(query, json_str);
+    let elapsed_run_query = now.elapsed();
+
+    pgrx::notice!("rsonpath took: {:?}", elapsed_run_query);
+
+    let now = Instant::now();
+    let results: Vec<(i64, pgrx::Json)> = sink_vec.iter()
+        .enumerate()
+        .map(|(i, val)| {
+            let raw = String::from_utf8_lossy(val.bytes()).into_owned();
+            (i as i64, pgrx::Json(serde_json::from_str(&raw).unwrap()))
+        })
+        .collect();
+    let elapsed_aggregate_results = now.elapsed();
+
+    pgrx::notice!("results aggregation took: {:?}", elapsed_aggregate_results);
 
     return TableIterator::new(results);
 }

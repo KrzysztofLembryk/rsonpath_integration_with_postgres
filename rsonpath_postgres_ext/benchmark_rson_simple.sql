@@ -5,16 +5,16 @@ DECLARE
     ms_json  numeric(20,3);
     ms_native numeric(20,3);
     cnt bigint;
-    ROW_ID int := 3;  -- idx: 22 900MB json, idx 24: 200 MB json
+    ROW_ID int := 24;  -- idx: 22 900MB json, idx 24: 200 MB json
 BEGIN
      -- Json around 900MB (1GB is limit for one json row)
      -- 1. rsonpath str iterator
      t0 := clock_timestamp();
 
-     EXPLAIN ANALYZE
+     -- EXPLAIN ANALYZE
      SELECT count(*) INTO cnt
      FROM json_table jt,
-          LATERAL rsonpath_ext_table_iter_str('$.records[*].name', jt.data::text) AS r
+          LATERAL rsonpath_ext_str_timed('$.records[*].name', jt.data::text) AS r
      WHERE jt.id = ROW_ID;
 
      ms_str := round((extract(epoch FROM (clock_timestamp() - t0)) * 1000.0)::numeric, 3);
@@ -24,13 +24,13 @@ BEGIN
 
      SELECT count(*) INTO cnt
      FROM json_table jt,
-          LATERAL rsonpath_ext_table_iter_json('$.records[*].name', jt.data::text) AS r
+          LATERAL rsonpath_ext_json('$.records[*].name', jt.data::text) AS r
      WHERE jt.id = ROW_ID;
 
      ms_json := round((extract(epoch FROM (clock_timestamp() - t0)) * 1000.0)::numeric, 3);
 
      -- Print results
-     -- RAISE NOTICE 'qeury: $.records[*].name, elapsed_str: % ms, elapsed_json: % ms', ms_str, ms_json;
+     RAISE NOTICE 'qeury: $.records[*].name, elapsed_str: % ms, elapsed_json: % ms', ms_str, ms_json;
 
 
 
@@ -39,7 +39,7 @@ BEGIN
 
      SELECT count(*) INTO cnt
      FROM json_table jt,
-          LATERAL rsonpath_ext_table_iter_str('$.records[*].scores[*]', jt.data::text) AS r
+          LATERAL rsonpath_ext_str('$.records[*].scores[*]', jt.data::text) AS r
      WHERE jt.id = ROW_ID;
 
      ms_str := round((extract(epoch FROM (clock_timestamp() - t0)) * 1000.0)::numeric, 3);
@@ -49,13 +49,13 @@ BEGIN
 
      SELECT count(*) INTO cnt
      FROM json_table jt,
-          LATERAL rsonpath_ext_table_iter_json('$.records[*].scores[*]', jt.data::text) AS r
+          LATERAL rsonpath_ext_json('$.records[*].scores[*]', jt.data::text) AS r
      WHERE jt.id = ROW_ID;
 
      ms_json := round((extract(epoch FROM (clock_timestamp() - t0)) * 1000.0)::numeric, 3);
 
      -- Print results
-     -- RAISE NOTICE 'qeury: $.records[*].scores[*], elapsed_str: % ms, elapsed_json: % ms', ms_str, ms_json;
+     RAISE NOTICE 'qeury: $.records[*].scores[*], elapsed_str: % ms, elapsed_json: % ms', ms_str, ms_json;
 
 
      -- RESULTS for 900MB:
