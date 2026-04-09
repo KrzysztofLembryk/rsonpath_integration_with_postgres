@@ -1,0 +1,53 @@
+# Rsonpath vs jsonpath on 90MB
+
+```
+        query              |      method       | json_size_mb |  avg_ms  
+---------------------------+-------------------+--------------+----------
+ $.records[*].name         | rsonpath_ext_json |       89.674 | 2868.214
+ $.records[*].name         | rsonpath_ext_str  |       89.674 | 2693.928
+ $.records[*].address.city | rsonpath_ext_json |       89.674 | 3814.609
+ $.records[*].address.city | rsonpath_ext_str  |       89.674 | 3688.602
+ $.records[*].scores[*]    | rsonpath_ext_json |       89.674 | 5032.800
+ $.records[*].scores[*]    | rsonpath_ext_str  |       89.674 | 4591.907
+
+## JSONB ##
+
+           query           | json_size_mb | avg_time_ms 
+---------------------------+--------------+-------------
+ $.records[*].name         |       99.781 |   10561.397 
+ $.records[*].address.city |       99.781 |   10579.047 
+ $.records[*].scores[*]    |       99.781 |  381815.898 
+
+
+## JSON with cast to JSONB ##
+
+           query           | json_size_mb | avg_time_ms |
+---------------------------+--------------+-------------+
+ <CAST json TO jsonb time> |       89.674 |    1161.054 |
+ $.records[*].name         |       89.674 |   10457.962 |
+ $.records[*].address.city |       89.674 |   10268.039 |
+ $.records[*].scores[*]    |       89.674 |  365784.442 |
+```
+
+# Rsonpath on 225MB and 900MB
+
+```
+        query              | method            | json_size_mb |  avg_ms   | ext_ms
+---------------------------+-------------------+--------------+-----------+-------
+ $.records[*].address.city | rsonpath_ext_json |     908      | 39698.881 | 31445 
+ $.records[*].address.city | rsonpath_ext_str  |     908      | 38024.570 | 31801 
+ $.records[*].name         | rsonpath_ext_json |     908      | 29122.311 | 21454 
+ $.records[*].name         | rsonpath_ext_str  |     908      | 27077.488 | 20901 
+ $.records[*].scores[*]    | rsonpath_ext_json |     908      | 50290.777 | 34251 
+ $.records[*].scores[*]    | rsonpath_ext_str  |     908      | 46977.955 | 34437 
+
+
+           query           |      method       | json_size_mb |  avg_ms   | ext_ms
+---------------------------+-------------------+--------------+-------------------
+ $.records[*].address.city | rsonpath_ext_json |      224.669 | 10901.796 | 8727 
+ $.records[*].address.city | rsonpath_ext_str  |      224.669 | 10183.218 | 8055 
+ $.records[*].name         | rsonpath_ext_json |      224.669 |  7018.159 | 5286 
+ $.records[*].name         | rsonpath_ext_str  |      224.669 |  6880.815 | 5151
+ $.records[*].scores[*]    | rsonpath_ext_json |      224.669 | 12389.811 | 8464 
+ $.records[*].scores[*]    | rsonpath_ext_str  |      224.669 | 11997.557 | 8859 
+```

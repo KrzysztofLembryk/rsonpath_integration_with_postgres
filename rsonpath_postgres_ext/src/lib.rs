@@ -2,6 +2,7 @@ use pgrx::prelude::*;
 
 ::pgrx::pg_module_magic!(name, version);
 
+use std::time::Instant;
 use rsonpath::input::BorrowedBytes;
 use rsonpath::result::Match;
 use rsonpath::{
@@ -9,9 +10,6 @@ use rsonpath::{
 };
 use pgrx::iter::TableIterator;
 
-// 1) benchmark dla rsonpath_ext_table_iter_str i rsonpath_ext_table_iter_json
-// plus porownac z operatorem jsonpath w postgresie
-// 2) duzy json np. d3 dataset
 #[pg_extern]
 fn rsonpath_ext_str(
     query: &str,
@@ -24,6 +22,30 @@ fn rsonpath_ext_str(
         .enumerate()
         .map(|(i, val)| (i as i64, String::from_utf8_lossy(val.bytes()).into_owned()))
         .collect();
+
+    TableIterator::new(results)
+}
+
+#[pg_extern]
+fn rsonpath_ext_str_timed(
+    query: &str,
+    json_str: &str,
+) -> TableIterator<'static, (name!(idx, i64), name!(val, String))> 
+{
+    let now = Instant::now();
+    let sink_vec = run_qeury(query, json_str);
+    let elapsed_run_query = now.elapsed();
+
+    pgrx::notice!("rsonpath_str took: {:?}", elapsed_run_query);
+
+    let now = Instant::now();
+    let results: Vec<(i64, String)> = sink_vec.into_iter()
+        .enumerate()
+        .map(|(i, val)| (i as i64, String::from_utf8_lossy(val.bytes()).into_owned()))
+        .collect();
+    let elapsed_aggregate_results = now.elapsed();
+
+    pgrx::notice!("results_str aggregation took: {:?}", elapsed_aggregate_results);
 
     TableIterator::new(results)
 }
@@ -47,8 +69,36 @@ fn rsonpath_ext_json(
     return TableIterator::new(results);
 }
 
+
 #[pg_extern]
-fn rsonpath_ext_table_iter_jsonb(
+fn rsonpath_ext_json_timed(
+    query: &str, 
+    json_str: &str
+) -> TableIterator<'static, (name!(idx, i64), name!(val, pgrx::Json))> 
+{
+    let now = Instant::now();
+    let sink_vec = run_qeury(query, json_str);
+    let elapsed_run_query = now.elapsed();
+
+    pgrx::notice!("rsonpath_json took: {:?}", elapsed_run_query);
+
+    let now = Instant::now();
+    let results: Vec<(i64, pgrx::Json)> = sink_vec.iter()
+        .enumerate()
+        .map(|(i, val)| {
+            let raw = String::from_utf8_lossy(val.bytes()).into_owned();
+            (i as i64, pgrx::Json(serde_json::from_str(&raw).unwrap()))
+        })
+        .collect();
+    let elapsed_aggregate_results = now.elapsed();
+
+    pgrx::notice!("results_json aggregation took: {:?}", elapsed_aggregate_results);
+
+    return TableIterator::new(results);
+}
+
+#[pg_extern]
+fn rsonpath_ext_jsonb(
     query: &str, 
     json_str: &str
 ) -> TableIterator<'static, (name!(idx, i64), name!(val, pgrx::JsonB))> 
@@ -97,6 +147,10 @@ mod tests {
     use std::fmt::Write as FmtWrite;
     use std::time::Instant;
 
+    const TABLE_NAME: &str = "json_table";
+    const JSON_COL_NAME: &str = "json";
+    const JSONB_COL_NAME: &str = "jsonb";
+    const N_ITERS: usize = 3;
     const ONE_MB: f64 = (1024 * 1024) as f64;
     const EXTENSIONS: &'static [&'static str] = &[
         "rsonpath_ext_json",
@@ -108,6 +162,8 @@ mod tests {
     const LARGE_JSONS: &'static [&'static str] = &[
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/large.json",), 
         ];
+    
+
 
     const PERF_RESULTS_PATH: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -464,9 +520,9 @@ mod tests {
             "Test", "JSON MB", "Iters", "Avg (ms)").unwrap();
         writeln!(report, "{}", "-".repeat(80)).unwrap();
 
-        let table_name: &str = "json_table";
-        let json_col_name: &str = "json";
-        let jsonb_col_name: &str = "jsonb";
+        let table_name = TABLE_NAME;
+        let json_col_name = JSON_COL_NAME;
+        let jsonb_col_name = JSONB_COL_NAME;
         let mut table_op_times: Vec<(String, f64, f64)> = vec![];
 
         for json_path in LARGE_JSONS
@@ -496,8 +552,9 @@ mod tests {
                         json_col_name,
                         jsonb_col_name,
                     );
-                    let iters = 5;
-                    let avg_ms = bench_and_discard_results(&sql, 1, iters);
+                    let iters = N_ITERS;
+                    let warmup_iters = 1;
+                    let avg_ms = bench_and_discard_results(&sql, warmup_iters, iters);
 
                     writeln!(report, "{:<55} {:>12.2} {:>10} {:>12.4}",
                         format!("{}# {}", ext_name, query), 
@@ -519,6 +576,110 @@ mod tests {
         std::fs::write(PERF_RESULTS_PATH, &report).unwrap_or_else(|e| {
             panic!("Failed to write perf results to {}: {}", PERF_RESULTS_PATH, e)
         });
+    }
+
+
+    #[pg_test]
+    fn test_performance_jsonpath() 
+    {
+        // Spi::run("SET client_min_messages = WARNING;").unwrap();
+
+        let mut report = String::new();
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        writeln!(report, "# perf results (epoch: {})", timestamp).unwrap();
+        writeln!(report, "{:<55} {:>12} {:>10} {:>12}",
+            "Test", "JSON MB", "Iters", "Avg (ms)").unwrap();
+        writeln!(report, "{}", "-".repeat(80)).unwrap();
+
+        let table_name = TABLE_NAME;
+        let json_col_name = JSON_COL_NAME;
+        let jsonb_col_name = JSONB_COL_NAME;
+        let large_jsons = get_all_large_jsons("/tests/testdata/");
+        let mut table_op_times: Vec<(String, f64, f64)> = vec![];
+
+        for json_path in large_jsons.iter()
+        {
+            let large_json = load_json(json_path);
+            let json_size_mb = (large_json.len() as f64) / ONE_MB;
+
+            let creation_time = create_json_table(table_name, json_col_name, jsonb_col_name);
+            let insertion_time = insert_data_into_json_table(table_name, json_col_name, jsonb_col_name, &large_json);
+
+            table_op_times.push((
+                String::from(json_path), 
+                creation_time, 
+                insertion_time
+            ));
+
+            for test_case in TEST_CASES_LARGE 
+            {
+                let ext_name = "jsonpath";
+                pgrx::info!("START: {}#{}", ext_name, test_case.name);
+
+                let query = test_case.query;
+                let sql = build_sql(
+                    ext_name, 
+                    query, 
+                    table_name,  
+                    json_col_name,
+                    jsonb_col_name,
+                );
+                let iters = N_ITERS;
+                let warmup_iters = 1;
+                let avg_ms = bench_and_discard_results(&sql, warmup_iters, iters);
+
+                writeln!(report, "{:<55} {:>12.2} {:>10} {:>12.4}",
+                    format!("{}# {}", ext_name, query), 
+                    json_size_mb, 
+                    iters, 
+                    avg_ms
+                ).unwrap();
+                
+            }
+            drop_json_table(table_name);
+        }
+
+        for op_time in table_op_times.iter()
+        {
+            writeln!(report, "JSON: {}\n --creation_time: {:.2} ms\n --insertion_time: {:.2} ms", op_time.0, op_time.1, op_time.2).unwrap();
+        }
+
+        std::fs::write(PERF_RESULTS_PATH, &report).unwrap_or_else(|e| {
+            panic!("Failed to write perf results to {}: {}", PERF_RESULTS_PATH, e)
+        });
+    }
+
+    fn get_all_large_jsons(data_path: &str) -> Vec<String>
+    {
+        let data_path = data_path.strip_prefix("/").map_or(data_path, |s| s);
+        let dir_path = format!("{}/{}", env!("CARGO_MANIFEST_DIR"), data_path);
+        let dir_entries = std::fs::read_dir(dir_path).unwrap();
+        let mut large_jsons = vec![];
+        // (?i)             - Case-insensitive flag
+        // (?:^|[^a-z])     - Matches the start of the string OR any non-letter (allows '_', '-', etc.)
+        // large            - The exact word
+        // (?:[^a-z].*)?    - Matches a non-letter immediately after 'large', followed by anything
+        // \.json$           - Ensures the string ends exactly with '.json'
+        let re = regex::Regex::new(r"(?i)(?:^|[^a-z])large(?:[^a-z].*)?\.json$").unwrap();
+
+        for dir_entry in dir_entries
+        {
+            if let Ok(dir_entry) = dir_entry
+            {
+                let path = String::from(dir_entry.path().to_str().unwrap());
+
+                if re.is_match(&path)
+                {
+                    large_jsons.push(path);
+                }
+            }
+        }
+
+        return large_jsons;
     }
 
     // #[pg_test]

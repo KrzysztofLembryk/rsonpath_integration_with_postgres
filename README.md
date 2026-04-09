@@ -56,7 +56,7 @@ COPY json_table(data) FROM '/tmp/file.json';
 
 # rsonpath_ext 
 ```bash
-SELECT rsonpath_ext('$.person.phoneNumbers[*].number', data::text)
+SELECT rsonpath_ext_json('$.person.phoneNumbers[*].number', data::text)
 FROM json_table;
 ```
 
