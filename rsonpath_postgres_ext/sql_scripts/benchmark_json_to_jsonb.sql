@@ -1,13 +1,13 @@
 -- Benchmark jsonpath on json with cast to jsonb 
 -- --> data generated via generate_testdata.py with SIZE_90_MB = 400_000
--- Greater sizes DO NOT WORK WITH JSONB
 -- #################################################################################
 -- Results:
---            query           | avg_time_ms |  count  
--- ===================================================
---  <CAST json TO jsonb time> |    1035.203 |       1
---  $.records[*].name         |    9365.056 |  400000
---  $.records[*].scores[*]    |  315178.160 | 1800148
+--            query           | avg_time_ms |  count  | json_size_mb 
+-- ---------------------------+-------------+---------+--------------
+--  <CAST json TO jsonb time> |    1161.054 |       1 |       89.674
+--  $.records[*].name         |   10457.962 |  400000 |       89.674
+--  $.records[*].address.city |   10268.039 |  400000 |       89.674
+--  $.records[*].scores[*]    |  365784.442 | 1800148 |       89.674
 
 DROP TABLE IF EXISTS json_table;
 DROP TABLE IF EXISTS benchmark_results;
@@ -22,8 +22,9 @@ FROM '/tmp/large.json';
 
 CREATE TEMP TABLE benchmark_results (
     query text,
-    avg_time_ms numeric(20,3),
-    count INTEGER
+    count BIGINT,
+    json_size_mb numeric(20,3),
+    avg_time_ms numeric(20,3)
 );
 
 DO $$
@@ -32,10 +33,14 @@ DECLARE
     elapsed numeric;
     total_time numeric;
     cnt bigint;
+    js_size_mb numeric(20,3);
     q text;
-    queries text[] := '{"$.records[*].name", "$.records[*].scores[*]"}';
-    num_runs integer := 3;
+    queries text[] := '{"$.records[*].name", "$.records[*].address.city", "$.records[*].scores[*]"}';
+    num_runs integer := 1;
+    ONE_MB numeric := 1024.0 * 1024.0;
 BEGIN
+
+    SELECT round((sum(octet_length(data::text)) / ONE_MB)::numeric, 3) INTO js_size_mb FROM json_table;
 
     -- Benchmarking just the json to jsonb casting time
     total_time := 0;
@@ -50,8 +55,8 @@ BEGIN
         total_time := total_time + elapsed;
     END LOOP;
     
-    INSERT INTO benchmark_results (query, avg_time_ms, count)
-    VALUES ('<CAST json TO jsonb time>', round((total_time / num_runs)::numeric, 3), cnt);
+    INSERT INTO benchmark_results (query, avg_time_ms, count, json_size_mb)
+    VALUES ('<CAST json TO jsonb time>', round((total_time / num_runs)::numeric, 3), cnt, js_size_mb);
 
 
     FOREACH q IN ARRAY queries LOOP
@@ -69,8 +74,8 @@ BEGIN
             total_time := total_time + elapsed;
         END LOOP;
         
-        INSERT INTO benchmark_results (query, avg_time_ms, count)
-        VALUES (q, round((total_time / num_runs)::numeric, 3), cnt);
+        INSERT INTO benchmark_results (query, count, json_size_mb, avg_time_ms)
+        VALUES (q, round((total_time / num_runs)::numeric, 3), cnt, js_size_mb);
         
     END LOOP;
 

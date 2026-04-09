@@ -1,12 +1,13 @@
 -- Benchmark jsonpath on jsonb  
 -- --> with data generated via generate_testdata.py with SIZE_90_MB = 400_000
--- Greater sizes DO NOT WORK WITH JSONB
 -- #################################################################################
 -- Results:
---         query          | avg_time_ms |  count  
--- ===============================================
--- $.records[*].name      |    8745.669 |  400000
--- $.records[*].scores[*] |  316511.430 | 1800148
+--            query           | avg_time_ms |  count  | json_size_mb 
+-- ---------------------------+-------------+---------+--------------
+--  $.records[*].name         |   10561.397 |  400000 |       99.781
+--  $.records[*].address.city |   10579.047 |  400000 |       99.781
+--  $.records[*].scores[*]    |  381815.898 | 1800148 |       99.781
+
 
 DROP TABLE IF EXISTS json_table;
 DROP TABLE IF EXISTS benchmark_results;
@@ -21,8 +22,9 @@ FROM '/tmp/large.json';
 
 CREATE TEMP TABLE benchmark_results (
     query text,
-    avg_time_ms numeric(20,3),
-    count INTEGER
+    count INTEGER,
+    json_size_mb numeric(20,3),
+    avg_time_ms numeric(20,3)
 );
 
 DO $$
@@ -32,9 +34,13 @@ DECLARE
     total_time numeric;
     cnt bigint;
     q text;
-    queries text[] := '{"$.records[*].name", "$.records[*].scores[*]"}';
-    num_runs integer := 3;
+    queries text[] := '{"$.records[*].name", "$.records[*].address.city", "$.records[*].scores[*]"}';
+    num_runs integer := 1;
+    js_size_mb numeric(20,3);
+    ONE_MB numeric := 1024.0 * 1024.0;
 BEGIN
+
+    SELECT round((sum(octet_length(data::text)) / ONE_MB)::numeric, 3) INTO js_size_mb FROM json_table;
 
     FOREACH q IN ARRAY queries LOOP
         total_time := 0;
@@ -51,17 +57,11 @@ BEGIN
             total_time := total_time + elapsed;
         END LOOP;
         
-        INSERT INTO benchmark_results (query, avg_time_ms, count)
-        VALUES (q, round((total_time / num_runs)::numeric, 3), cnt);
+        INSERT INTO benchmark_results (query, count, json_size_mb, avg_time_ms)
+        VALUES (q, round((total_time / num_runs)::numeric, 3), cnt, js_size_mb);
         
     END LOOP;
 
-    -- For 90MB file
-    -- query: $.records[*].name
-    -- elapsed_native_json: 11757.487 ms
-
-    -- query: $.records[*].scores[*]
-    -- elapsed_native_json: 329637.032 ms 
 END $$;
 
 SELECT * FROM benchmark_results;

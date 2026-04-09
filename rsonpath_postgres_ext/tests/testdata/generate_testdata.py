@@ -12,7 +12,10 @@ import sys
 
 SEED = 42
 SIZE_90_MB = 400_000
+SIZE_180_MB = 800_000
 SIZE_225_MB = 1_000_000
+SIZE_450_MB = 2_000_000
+SIZE_900_MB = 4_000_000
 
 NUM_RECORDS = SIZE_90_MB 
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
