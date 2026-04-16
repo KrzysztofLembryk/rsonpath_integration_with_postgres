@@ -156,6 +156,7 @@ mod tests {
         "rsonpath_ext_json",
         "rsonpath_ext_str",
         "rsonpath_ext_count",
+        "jsonpath",
         ];
     const SMALL_JSON: &str = include_str!("../tests/testdata/small.json");
     const MEDIUM_JSON: &str = include_str!("../tests/testdata/medium.json");
