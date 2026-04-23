@@ -1,0 +1,3678 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1200" height="2134" onload="init(evt)" viewBox="0 0 1200 2134" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search, #ignorecase { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show, #ignorecase:hover, #ignorecase.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching, currentSearchTerm, ignorecase, ignorecaseBtn;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		ignorecaseBtn = document.getElementById("ignorecase");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+		currentSearchTerm = null;
+
+		// use GET parameters to restore a flamegraphs state.
+		var params = get_params();
+		if (params.x && params.y)
+			zoom(find_group(document.querySelector('[x="' + params.x + '"][y="' + params.y + '"]')));
+                if (params.s) search(params.s);
+	}
+
+	// event listeners
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom(true);
+			zoom(target);
+			if (!document.querySelector('.parent')) {
+				// we have basically done a clearzoom so clear the url
+				var params = get_params();
+				if (params.x) delete params.x;
+				if (params.y) delete params.y;
+				history.replaceState(null, null, parse_params(params));
+				unzoombtn.classList.add("hide");
+				return;
+			}
+
+			// set parameters for zoom state
+			var el = target.querySelector("rect");
+			if (el && el.attributes && el.attributes.y && el.attributes._orig_x) {
+				var params = get_params()
+				params.x = el.attributes._orig_x.value;
+				params.y = el.attributes.y.value;
+				history.replaceState(null, null, parse_params(params));
+			}
+		}
+		else if (e.target.id == "unzoom") clearzoom();
+		else if (e.target.id == "search") search_prompt();
+		else if (e.target.id == "ignorecase") toggle_ignorecase();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	// ctrl-I to toggle case-sensitive search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+		else if (e.ctrlKey && e.keyCode === 73) {
+			e.preventDefault();
+			toggle_ignorecase();
+		}
+	}, false)
+
+	// functions
+	function get_params() {
+		var params = {};
+		var paramsarr = window.location.search.substr(1).split('&');
+		for (var i = 0; i < paramsarr.length; ++i) {
+			var tmp = paramsarr[i].split("=");
+			if (!tmp[0] || !tmp[1]) continue;
+			params[tmp[0]]  = decodeURIComponent(tmp[1]);
+		}
+		return params;
+	}
+	function parse_params(params) {
+		var uri = "?";
+		for (var key in params) {
+			uri += key + '=' + encodeURIComponent(params[key]) + '&';
+		}
+		if (uri.slice(-1) == "&")
+			uri = uri.substring(0, uri.length - 1);
+		if (uri == '?')
+			uri = window.location.href.split('?')[0];
+		return uri;
+	}
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		var sl = t.getSubStringLength(0, txt.length);
+		// check if only whitespace or if we can fit the entire string into width w
+		if (/^ *$/.test(txt) || sl < w)
+			return;
+
+		// this isn't perfect, but gives a good starting point
+		// and avoids calling getSubStringLength too often
+		var start = Math.floor((w/sl) * txt.length);
+		for (var x = start; x > 0; x = x-2) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+		search();
+	}
+	function unzoom(dont_update_text) {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			if(!dont_update_text) update_text(el[i]);
+		}
+		search();
+	}
+	function clearzoom() {
+		unzoom();
+
+		// remove zoom state
+		var params = get_params();
+		if (params.x) delete params.x;
+		if (params.y) delete params.y;
+		history.replaceState(null, null, parse_params(params));
+	}
+
+	// search
+	function toggle_ignorecase() {
+		ignorecase = !ignorecase;
+		if (ignorecase) {
+			ignorecaseBtn.classList.add("show");
+		} else {
+			ignorecaseBtn.classList.remove("show");
+		}
+		reset_search();
+		search();
+	}
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+		var params = get_params();
+		delete params.s;
+		history.replaceState(null, null, parse_params(params));
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)"
+			    + (ignorecase ? ", ignoring case" : "")
+			    + "\nPress Ctrl-i to toggle case sensitivity", "");
+			if (term != null) search(term);
+		} else {
+			reset_search();
+			searching = 0;
+			currentSearchTerm = null;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		if (term) currentSearchTerm = term;
+		if (currentSearchTerm === null) return;
+
+		var re = new RegExp(currentSearchTerm, ignorecase ? 'i' : '');
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+		var params = get_params();
+		params.s = currentSearchTerm;
+		history.replaceState(null, null, parse_params(params));
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1200.0" height="2134.0" fill="url(#background)"  />
+<text id="title" x="600.00" y="24" >Flame Graph</text>
+<text id="details" x="10.00" y="2117" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1090.00" y="24" >Search</text>
+<text id="ignorecase" x="1174.00" y="24" >ic</text>
+<text id="matched" x="1090.00" y="2117" > </text>
+<g id="frames">
+<g >
+<title>LockBuffer (102,073,834 samples, 0.03%)</title><rect x="177.0" y="2037" width="0.4" height="15.0" fill="rgb(235,142,34)" rx="2" ry="2" />
+<text  x="179.97" y="2047.5" ></text>
+</g>
+<g >
+<title>cee_scape::asm_based::call_with_sigsetjmp (91,529,879 samples, 0.03%)</title><rect x="254.0" y="1989" width="0.4" height="15.0" fill="rgb(232,127,30)" rx="2" ry="2" />
+<text  x="257.01" y="1999.5" ></text>
+</g>
+<g >
+<title>nocachegetattr (109,016,805 samples, 0.04%)</title><rect x="454.6" y="2037" width="0.4" height="15.0" fill="rgb(227,101,24)" rx="2" ry="2" />
+<text  x="457.58" y="2047.5" ></text>
+</g>
+<g >
+<title>cfree@GLIBC_2.2.5 (221,811,992 samples, 0.07%)</title><rect x="426.4" y="2037" width="0.8" height="15.0" fill="rgb(233,131,31)" rx="2" ry="2" />
+<text  x="429.37" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (212,124,944 samples, 0.07%)</title><rect x="628.2" y="2021" width="0.9" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="631.24" y="2031.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1589" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1599.5" ></text>
+</g>
+<g >
+<title>malloc (33,687,278 samples, 0.01%)</title><rect x="191.8" y="2021" width="0.1" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="194.76" y="2031.5" ></text>
+</g>
+<g >
+<title>ReScanExprContext (71,394,691 samples, 0.02%)</title><rect x="182.9" y="2037" width="0.3" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="185.89" y="2047.5" ></text>
+</g>
+<g >
+<title>hashbrown::raw::RawTable&lt;T,A&gt;::reserve_rehash (152,332,774 samples, 0.05%)</title><rect x="441.2" y="2037" width="0.6" height="15.0" fill="rgb(241,167,39)" rx="2" ry="2" />
+<text  x="444.18" y="2047.5" ></text>
+</g>
+<g >
+<title>AllocSetAlloc (193,331,645 samples, 0.06%)</title><rect x="59.5" y="2053" width="0.8" height="15.0" fill="rgb(231,124,29)" rx="2" ry="2" />
+<text  x="62.50" y="2063.5" ></text>
+</g>
+<g >
+<title>HeapTupleHeaderGetDatum (71,757,661 samples, 0.02%)</title><rect x="79.0" y="2053" width="0.3" height="15.0" fill="rgb(209,19,4)" rx="2" ry="2" />
+<text  x="82.01" y="2063.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc12___rust_alloc (75,661,466 samples, 0.03%)</title><rect x="550.1" y="2053" width="0.3" height="15.0" fill="rgb(213,41,9)" rx="2" ry="2" />
+<text  x="553.06" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (28,583,429 samples, 0.01%)</title><rect x="414.4" y="1989" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="417.38" y="1999.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1413" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1423.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (12,935,813,683 samples, 4.34%)</title><rect x="324.4" y="1797" width="51.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="327.43" y="1807.5" >[[ker..</text>
+</g>
+<g >
+<title>nvme_irq (290,065,924 samples, 0.10%)</title><rect x="1100.1" y="1941" width="1.2" height="15.0" fill="rgb(225,95,22)" rx="2" ry="2" />
+<text  x="1103.14" y="1951.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::quotes::shared::vector_256::classify_block (389,584,712 samples, 0.13%)</title><rect x="1136.6" y="2053" width="1.5" height="15.0" fill="rgb(232,128,30)" rx="2" ry="2" />
+<text  x="1139.55" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (44,653,742 samples, 0.01%)</title><rect x="500.9" y="2021" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="503.91" y="2031.5" ></text>
+</g>
+<g >
+<title>new_list (29,904,900 samples, 0.01%)</title><rect x="282.9" y="2021" width="0.2" height="15.0" fill="rgb(249,206,49)" rx="2" ry="2" />
+<text  x="285.93" y="2031.5" ></text>
+</g>
+<g >
+<title>_bt_checkpage (85,407,782 samples, 0.03%)</title><rect x="396.6" y="2037" width="0.3" height="15.0" fill="rgb(241,166,39)" rx="2" ry="2" />
+<text  x="399.57" y="2047.5" ></text>
+</g>
+<g >
+<title>rsonpath::input::padding::TwoSidesPaddedInput::try_slice (62,624,487 samples, 0.02%)</title><rect x="535.7" y="2037" width="0.3" height="15.0" fill="rgb(253,222,53)" rx="2" ry="2" />
+<text  x="538.73" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1029" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1039.5" ></text>
+</g>
+<g >
+<title>pgrx::memcxt::PgMemoryContexts::value (40,107,697 samples, 0.01%)</title><rect x="262.1" y="2005" width="0.1" height="15.0" fill="rgb(244,181,43)" rx="2" ry="2" />
+<text  x="265.09" y="2015.5" ></text>
+</g>
+<g >
+<title>_bt_next (55,746,488 samples, 0.02%)</title><rect x="402.8" y="2037" width="0.3" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="405.85" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="741" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="751.5" ></text>
+</g>
+<g >
+<title>_int_malloc (213,935,196 samples, 0.07%)</title><rect x="252.6" y="1973" width="0.9" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="255.62" y="1983.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc12___rust_alloc (28,308,870 samples, 0.01%)</title><rect x="195.1" y="2005" width="0.1" height="15.0" fill="rgb(213,41,9)" rx="2" ry="2" />
+<text  x="198.08" y="2015.5" ></text>
+</g>
+<g >
+<title>ExecReScan (604,295,753 samples, 0.20%)</title><rect x="165.2" y="2037" width="2.4" height="15.0" fill="rgb(205,2,0)" rx="2" ry="2" />
+<text  x="168.16" y="2047.5" ></text>
+</g>
+<g >
+<title>rsonpath::input::padding::PaddedBlock::pad_last_block (262,627,487 samples, 0.09%)</title><rect x="219.0" y="2005" width="1.1" height="15.0" fill="rgb(249,206,49)" rx="2" ry="2" />
+<text  x="222.04" y="2015.5" ></text>
+</g>
+<g >
+<title>core::ptr::drop_in_place&lt;rsonpath_syntax::Segment&gt; (112,774,626 samples, 0.04%)</title><rect x="429.6" y="2037" width="0.4" height="15.0" fill="rgb(244,183,43)" rx="2" ry="2" />
+<text  x="432.57" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (34,509,470 samples, 0.01%)</title><rect x="375.0" y="1669" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="377.99" y="1679.5" ></text>
+</g>
+<g >
+<title>FileAccess (95,315,151 samples, 0.03%)</title><rect x="74.1" y="2053" width="0.4" height="15.0" fill="rgb(245,187,44)" rx="2" ry="2" />
+<text  x="77.12" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (54,698,810 samples, 0.02%)</title><rect x="533.9" y="1925" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="536.95" y="1935.5" ></text>
+</g>
+<g >
+<title>MemoryContextCreate (156,016,857 samples, 0.05%)</title><rect x="97.0" y="2053" width="0.6" height="15.0" fill="rgb(237,149,35)" rx="2" ry="2" />
+<text  x="99.95" y="2063.5" ></text>
+</g>
+<g >
+<title>AllocSetReset (106,707,261 samples, 0.04%)</title><rect x="62.9" y="2053" width="0.4" height="15.0" fill="rgb(226,100,24)" rx="2" ry="2" />
+<text  x="65.92" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="437" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="447.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (192,429,520 samples, 0.06%)</title><rect x="628.3" y="1973" width="0.8" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="631.32" y="1983.5" ></text>
+</g>
+<g >
+<title>SearchCatCacheInternal (1,394,553,688 samples, 0.47%)</title><rect x="246.1" y="37" width="5.5" height="15.0" fill="rgb(213,38,9)" rx="2" ry="2" />
+<text  x="249.07" y="47.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,561,822,319 samples, 0.52%)</title><rect x="245.6" y="1797" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1807.5" ></text>
+</g>
+<g >
+<title>alloc::raw_vec::RawVecInner&lt;A&gt;::finish_grow (224,111,232 samples, 0.08%)</title><rect x="201.8" y="2005" width="0.8" height="15.0" fill="rgb(233,129,30)" rx="2" ry="2" />
+<text  x="204.76" y="2015.5" ></text>
+</g>
+<g >
+<title>rsonpath_syntax::parser::bracketed_selection (235,192,058 samples, 0.08%)</title><rect x="1172.3" y="2053" width="1.0" height="15.0" fill="rgb(237,148,35)" rx="2" ry="2" />
+<text  x="1175.33" y="2063.5" ></text>
+</g>
+<g >
+<title>FunctionCall2Coll (376,392,929 samples, 0.13%)</title><rect x="74.6" y="2053" width="1.5" height="15.0" fill="rgb(227,102,24)" rx="2" ry="2" />
+<text  x="77.58" y="2063.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc11___rdl_alloc (48,227,275 samples, 0.02%)</title><rect x="194.9" y="2005" width="0.2" height="15.0" fill="rgb(224,90,21)" rx="2" ry="2" />
+<text  x="197.89" y="2015.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc14___rust_dealloc (31,805,273 samples, 0.01%)</title><rect x="285.1" y="2037" width="0.2" height="15.0" fill="rgb(252,218,52)" rx="2" ry="2" />
+<text  x="288.14" y="2047.5" ></text>
+</g>
+<g >
+<title>&lt;rsonpath::input::padding::TwoSidesPaddedInput as rsonpath::input::SliceSeekable&gt;::seek_non_whitespace_backward (106,314,476 samples, 0.04%)</title><rect x="53.4" y="2053" width="0.4" height="15.0" fill="rgb(241,167,40)" rx="2" ry="2" />
+<text  x="56.39" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (21,865,832,209 samples, 7.34%)</title><rect x="289.1" y="1989" width="86.6" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="292.11" y="1999.5" >[[kernel.k..</text>
+</g>
+<g >
+<title>[unknown] (1,549,584,509 samples, 0.52%)</title><rect x="245.6" y="389" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="399.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="565" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="575.5" ></text>
+</g>
+<g >
+<title>LWLockAcquire (259,388,559 samples, 0.09%)</title><rect x="80.7" y="2053" width="1.1" height="15.0" fill="rgb(209,20,4)" rx="2" ry="2" />
+<text  x="83.73" y="2063.5" ></text>
+</g>
+<g >
+<title>ReadBufferExtended (133,336,819 samples, 0.04%)</title><rect x="183.4" y="2037" width="0.5" height="15.0" fill="rgb(242,171,40)" rx="2" ry="2" />
+<text  x="186.35" y="2047.5" ></text>
+</g>
+<g >
+<title>ReleaseCatCache (94,055,836 samples, 0.03%)</title><rect x="185.9" y="2037" width="0.3" height="15.0" fill="rgb(227,102,24)" rx="2" ry="2" />
+<text  x="188.87" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (28,583,429 samples, 0.01%)</title><rect x="414.4" y="2021" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="417.38" y="2031.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (26,010,789 samples, 0.01%)</title><rect x="676.7" y="2037" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="679.71" y="2047.5" ></text>
+</g>
+<g >
+<title>heap_form_tuple (598,810,930 samples, 0.20%)</title><rect x="690.1" y="2053" width="2.4" height="15.0" fill="rgb(216,52,12)" rx="2" ry="2" />
+<text  x="693.10" y="2063.5" ></text>
+</g>
+<g >
+<title>tts_minimal_clear (115,941,463 samples, 0.04%)</title><rect x="1183.8" y="2053" width="0.5" height="15.0" fill="rgb(242,171,40)" rx="2" ry="2" />
+<text  x="1186.81" y="2063.5" ></text>
+</g>
+<g >
+<title>tts_buffer_heap_getsomeattrs (383,497,569 samples, 0.13%)</title><rect x="1182.3" y="2053" width="1.5" height="15.0" fill="rgb(222,81,19)" rx="2" ry="2" />
+<text  x="1185.26" y="2063.5" ></text>
+</g>
+<g >
+<title>LWLockAcquire (129,068,820 samples, 0.04%)</title><rect x="174.4" y="2037" width="0.5" height="15.0" fill="rgb(209,20,4)" rx="2" ry="2" />
+<text  x="177.40" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="901" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="911.5" ></text>
+</g>
+<g >
+<title>tuplestore_begin_heap (172,397,130 samples, 0.06%)</title><rect x="1184.9" y="2053" width="0.7" height="15.0" fill="rgb(245,184,44)" rx="2" ry="2" />
+<text  x="1187.92" y="2063.5" ></text>
+</g>
+<g >
+<title>fetch_input_tuple (183,086,683 samples, 0.06%)</title><rect x="436.8" y="2037" width="0.7" height="15.0" fill="rgb(217,58,14)" rx="2" ry="2" />
+<text  x="439.81" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (45,738,562 samples, 0.02%)</title><rect x="1158.8" y="1957" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1161.76" y="1967.5" ></text>
+</g>
+<g >
+<title>copytup_heap (37,258,223 samples, 0.01%)</title><rect x="427.2" y="2037" width="0.2" height="15.0" fill="rgb(235,138,33)" rx="2" ry="2" />
+<text  x="430.25" y="2047.5" ></text>
+</g>
+<g >
+<title>heap_page_prune_opt (42,643,496 samples, 0.01%)</title><rect x="444.4" y="2037" width="0.2" height="15.0" fill="rgb(211,29,7)" rx="2" ry="2" />
+<text  x="447.43" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (2,892,791,559 samples, 0.97%)</title><rect x="245.6" y="2005" width="11.4" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="2015.5" ></text>
+</g>
+<g >
+<title>rsonpath::automaton::minimizer::Minimizer::activate_if_new (748,682,856 samples, 0.25%)</title><rect x="1111.0" y="2053" width="3.0" height="15.0" fill="rgb(245,188,45)" rx="2" ry="2" />
+<text  x="1114.03" y="2063.5" ></text>
+</g>
+<g >
+<title>&lt;core::str::lossy::Utf8Chunks as core::iter::traits::iterator::Iterator&gt;::next (1,351,306,393 samples, 0.45%)</title><rect x="1102.7" y="2037" width="5.4" height="15.0" fill="rgb(249,205,49)" rx="2" ry="2" />
+<text  x="1105.74" y="2047.5" ></text>
+</g>
+<g >
+<title>__sigjmp_save (93,889,764 samples, 0.03%)</title><rect x="386.4" y="2037" width="0.3" height="15.0" fill="rgb(239,157,37)" rx="2" ry="2" />
+<text  x="389.35" y="2047.5" ></text>
+</g>
+<g >
+<title>nvme_irq (26,862,600 samples, 0.01%)</title><rect x="715.9" y="1941" width="0.1" height="15.0" fill="rgb(225,95,22)" rx="2" ry="2" />
+<text  x="718.91" y="1951.5" ></text>
+</g>
+<g >
+<title>palloc0 (109,604,413 samples, 0.04%)</title><rect x="729.4" y="2053" width="0.4" height="15.0" fill="rgb(251,213,51)" rx="2" ry="2" />
+<text  x="732.37" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (30,576,297 samples, 0.01%)</title><rect x="650.7" y="2005" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="653.68" y="2015.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (182,746,402 samples, 0.06%)</title><rect x="628.4" y="1957" width="0.7" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="631.35" y="1967.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (81,725,469 samples, 0.03%)</title><rect x="628.5" y="1893" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="631.49" y="1903.5" ></text>
+</g>
+<g >
+<title>__tls_get_addr (285,592,264 samples, 0.10%)</title><rect x="394.1" y="2037" width="1.2" height="15.0" fill="rgb(246,191,45)" rx="2" ry="2" />
+<text  x="397.15" y="2047.5" ></text>
+</g>
+<g >
+<title>ArrayGetNItems (74,460,422 samples, 0.02%)</title><rect x="145.1" y="2037" width="0.3" height="15.0" fill="rgb(227,105,25)" rx="2" ry="2" />
+<text  x="148.12" y="2047.5" ></text>
+</g>
+<g >
+<title>unlink_chunk.constprop.0 (302,820,508 samples, 0.10%)</title><rect x="1187.5" y="2053" width="1.2" height="15.0" fill="rgb(222,80,19)" rx="2" ry="2" />
+<text  x="1190.54" y="2063.5" ></text>
+</g>
+<g >
+<title>tuplestore_end (42,329,173 samples, 0.01%)</title><rect x="1185.6" y="2053" width="0.2" height="15.0" fill="rgb(213,40,9)" rx="2" ry="2" />
+<text  x="1188.60" y="2063.5" ></text>
+</g>
+<g >
+<title>ExecNestLoop (392,210,104 samples, 0.13%)</title><rect x="69.4" y="2053" width="1.6" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="72.43" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,561,822,319 samples, 0.52%)</title><rect x="245.6" y="1749" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1759.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1365" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1375.5" ></text>
+</g>
+<g >
+<title>&lt;rsonpath::result::nodes::NodesRecorder&lt;B,S&gt; as rsonpath::result::Recorder&lt;B&gt;&gt;::record_value_terminator (155,525,249 samples, 0.05%)</title><rect x="118.8" y="2037" width="0.6" height="15.0" fill="rgb(209,20,4)" rx="2" ry="2" />
+<text  x="121.77" y="2047.5" ></text>
+</g>
+<g >
+<title>GetOldestSnapshot (98,464,767 samples, 0.03%)</title><rect x="77.5" y="2053" width="0.4" height="15.0" fill="rgb(226,98,23)" rx="2" ry="2" />
+<text  x="80.51" y="2063.5" ></text>
+</g>
+<g >
+<title>_bt_moveright (114,990,975 samples, 0.04%)</title><rect x="402.4" y="2037" width="0.4" height="15.0" fill="rgb(216,53,12)" rx="2" ry="2" />
+<text  x="405.39" y="2047.5" ></text>
+</g>
+<g >
+<title>cee_scape::asm_based::call_with_sigsetjmp (190,364,263 samples, 0.06%)</title><rect x="258.5" y="2005" width="0.8" height="15.0" fill="rgb(232,127,30)" rx="2" ry="2" />
+<text  x="261.51" y="2015.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (98,112,378 samples, 0.03%)</title><rect x="1100.8" y="1877" width="0.4" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1103.80" y="1887.5" ></text>
+</g>
+<g >
+<title>btbeginscan (36,916,967 samples, 0.01%)</title><rect x="659.6" y="2053" width="0.2" height="15.0" fill="rgb(221,77,18)" rx="2" ry="2" />
+<text  x="662.63" y="2063.5" ></text>
+</g>
+<g >
+<title>&lt;alloc::vec::into_iter::IntoIter&lt;T,A&gt; as core::iter::traits::iterator::Iterator&gt;::next (189,109,180 samples, 0.06%)</title><rect x="187.7" y="2021" width="0.8" height="15.0" fill="rgb(218,63,15)" rx="2" ry="2" />
+<text  x="190.73" y="2031.5" ></text>
+</g>
+<g >
+<title>MemoryContextAlloc (33,259,849 samples, 0.01%)</title><rect x="177.8" y="2037" width="0.1" height="15.0" fill="rgb(215,49,11)" rx="2" ry="2" />
+<text  x="180.79" y="2047.5" ></text>
+</g>
+<g >
+<title>_bt_search.part.0 (116,542,083 samples, 0.04%)</title><rect x="403.6" y="2037" width="0.4" height="15.0" fill="rgb(243,178,42)" rx="2" ry="2" />
+<text  x="406.56" y="2047.5" ></text>
+</g>
+<g >
+<title>malloc (244,854,228 samples, 0.08%)</title><rect x="453.0" y="2037" width="1.0" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="455.98" y="2047.5" ></text>
+</g>
+<g >
+<title>&lt;alloc::string::String as core::clone::Clone&gt;::clone (96,931,949 samples, 0.03%)</title><rect x="114.8" y="2021" width="0.4" height="15.0" fill="rgb(217,57,13)" rx="2" ry="2" />
+<text  x="117.80" y="2031.5" ></text>
+</g>
+<g >
+<title>rsonpath::engine::main::Executor&lt;I,R,V&gt;::run_on_subtree::avx2_pclmulqdq_popcnt (8,257,225,607 samples, 2.77%)</title><rect x="1138.8" y="2053" width="32.7" height="15.0" fill="rgb(231,123,29)" rx="2" ry="2" />
+<text  x="1141.81" y="2063.5" >rs..</text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="613" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="623.5" ></text>
+</g>
+<g >
+<title>RemoveLocalLock (10,973,807,755 samples, 3.68%)</title><rect x="186.3" y="2037" width="43.5" height="15.0" fill="rgb(234,137,32)" rx="2" ry="2" />
+<text  x="189.28" y="2047.5" >Remo..</text>
+</g>
+<g >
+<title>nvme_prep_rq.part.0 (2,590,062,077 samples, 0.87%)</title><rect x="364.9" y="1717" width="10.3" height="15.0" fill="rgb(214,42,10)" rx="2" ry="2" />
+<text  x="367.92" y="1727.5" ></text>
+</g>
+<g >
+<title>MakeTupleTableSlot (72,234,079 samples, 0.02%)</title><rect x="177.5" y="2037" width="0.3" height="15.0" fill="rgb(221,74,17)" rx="2" ry="2" />
+<text  x="180.51" y="2047.5" ></text>
+</g>
+<g >
+<title>_bt_readnextpage (79,262,786 samples, 0.03%)</title><rect x="266.3" y="2021" width="0.3" height="15.0" fill="rgb(236,146,34)" rx="2" ry="2" />
+<text  x="269.30" y="2031.5" ></text>
+</g>
+<g >
+<title>heapam_index_fetch_tuple (101,357,787 samples, 0.03%)</title><rect x="444.7" y="2037" width="0.4" height="15.0" fill="rgb(254,225,53)" rx="2" ry="2" />
+<text  x="447.71" y="2047.5" ></text>
+</g>
+<g >
+<title>FileRead (58,228,399 samples, 0.02%)</title><rect x="171.1" y="2037" width="0.2" height="15.0" fill="rgb(228,106,25)" rx="2" ry="2" />
+<text  x="174.11" y="2047.5" ></text>
+</g>
+<g >
+<title>deconstruct_array (533,432,554 samples, 0.18%)</title><rect x="269.9" y="2021" width="2.1" height="15.0" fill="rgb(253,221,53)" rx="2" ry="2" />
+<text  x="272.88" y="2031.5" ></text>
+</g>
+<g >
+<title>ReadBufferExtended (136,484,446 samples, 0.05%)</title><rect x="100.1" y="2053" width="0.5" height="15.0" fill="rgb(242,171,40)" rx="2" ry="2" />
+<text  x="103.07" y="2063.5" ></text>
+</g>
+<g >
+<title>rsonpath_ext_str_wrapper (35,225,879 samples, 0.01%)</title><rect x="536.0" y="2037" width="0.1" height="15.0" fill="rgb(220,73,17)" rx="2" ry="2" />
+<text  x="538.98" y="2047.5" ></text>
+</g>
+<g >
+<title>rsonpath_postgres_ext::run_qeury (2,012,946,778 samples, 0.68%)</title><rect x="220.1" y="2005" width="8.0" height="15.0" fill="rgb(228,109,26)" rx="2" ry="2" />
+<text  x="223.08" y="2015.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (107,947,478 samples, 0.04%)</title><rect x="628.4" y="1941" width="0.4" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="631.38" y="1951.5" ></text>
+</g>
+<g >
+<title>tag_hash (29,806,336 samples, 0.01%)</title><rect x="542.1" y="2037" width="0.1" height="15.0" fill="rgb(245,185,44)" rx="2" ry="2" />
+<text  x="545.09" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (25,608,314 samples, 0.01%)</title><rect x="687.9" y="1989" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="690.87" y="1999.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (10,613,744,271 samples, 3.56%)</title><rect x="333.5" y="1765" width="42.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="336.52" y="1775.5" >[[k..</text>
+</g>
+<g >
+<title>[unknown] (1,536,689,955 samples, 0.52%)</title><rect x="245.6" y="133" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.63" y="143.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,549,584,509 samples, 0.52%)</title><rect x="245.6" y="373" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="383.5" ></text>
+</g>
+<g >
+<title>ExecEvalFuncArgs (63,839,393 samples, 0.02%)</title><rect x="150.0" y="2037" width="0.2" height="15.0" fill="rgb(245,187,44)" rx="2" ry="2" />
+<text  x="152.99" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (55,229,802 samples, 0.02%)</title><rect x="137.7" y="1941" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="140.67" y="1951.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc13___rdl_dealloc (33,041,076 samples, 0.01%)</title><rect x="195.2" y="2005" width="0.1" height="15.0" fill="rgb(213,38,9)" rx="2" ry="2" />
+<text  x="198.19" y="2015.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (2,351,407,661 samples, 0.79%)</title><rect x="365.6" y="1669" width="9.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="368.55" y="1679.5" ></text>
+</g>
+<g >
+<title>[unknown] (111,148,611,700 samples, 37.32%)</title><rect x="109.1" y="2053" width="440.3" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="112.09" y="2063.5" >[unknown]</text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (55,098,588 samples, 0.02%)</title><rect x="715.8" y="1989" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="718.81" y="1999.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (998,098,149 samples, 0.34%)</title><rect x="1097.4" y="2005" width="3.9" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1100.36" y="2015.5" ></text>
+</g>
+<g >
+<title>_bt_getroot (114,175,249 samples, 0.04%)</title><rect x="401.8" y="2037" width="0.4" height="15.0" fill="rgb(216,53,12)" rx="2" ry="2" />
+<text  x="404.79" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (61,303,906 samples, 0.02%)</title><rect x="1100.9" y="1829" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1103.94" y="1839.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,538,312,826 samples, 0.52%)</title><rect x="245.6" y="165" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.62" y="175.5" ></text>
+</g>
+<g >
+<title>tuplestore_gettuple (212,471,520 samples, 0.07%)</title><rect x="1185.8" y="2053" width="0.8" height="15.0" fill="rgb(226,101,24)" rx="2" ry="2" />
+<text  x="1188.77" y="2063.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc35___rust_no_alloc_shim_is_unstable_v2 (73,022,983 samples, 0.02%)</title><rect x="551.4" y="2053" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="554.38" y="2063.5" ></text>
+</g>
+<g >
+<title>btendscan (32,675,541 samples, 0.01%)</title><rect x="659.8" y="2053" width="0.1" height="15.0" fill="rgb(252,218,52)" rx="2" ry="2" />
+<text  x="662.78" y="2063.5" ></text>
+</g>
+<g >
+<title>alloc::raw_vec::RawVecInner&lt;A&gt;::reserve::do_reserve_and_handle (282,521,785 samples, 0.09%)</title><rect x="416.4" y="2037" width="1.2" height="15.0" fill="rgb(212,35,8)" rx="2" ry="2" />
+<text  x="419.45" y="2047.5" ></text>
+</g>
+<g >
+<title>end_MultiFuncCall (182,838,675 samples, 0.06%)</title><rect x="434.6" y="2037" width="0.8" height="15.0" fill="rgb(249,204,48)" rx="2" ry="2" />
+<text  x="437.63" y="2047.5" ></text>
+</g>
+<g >
+<title>hash_search (142,050,833 samples, 0.05%)</title><rect x="440.3" y="2037" width="0.6" height="15.0" fill="rgb(216,55,13)" rx="2" ry="2" />
+<text  x="443.31" y="2047.5" ></text>
+</g>
+<g >
+<title>_int_malloc (39,663,273 samples, 0.01%)</title><rect x="258.3" y="2005" width="0.2" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="261.35" y="2015.5" ></text>
+</g>
+<g >
+<title>BufferGetBlockNumber (35,680,016 samples, 0.01%)</title><rect x="146.3" y="2037" width="0.2" height="15.0" fill="rgb(206,7,1)" rx="2" ry="2" />
+<text  x="149.31" y="2047.5" ></text>
+</g>
+<g >
+<title>nvme_pci_complete_batch (25,288,412 samples, 0.01%)</title><rect x="715.9" y="1925" width="0.1" height="15.0" fill="rgb(245,185,44)" rx="2" ry="2" />
+<text  x="718.92" y="1935.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (2,411,651,513 samples, 0.81%)</title><rect x="365.3" y="1685" width="9.6" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="368.32" y="1695.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="533" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="543.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,549,584,509 samples, 0.52%)</title><rect x="245.6" y="341" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="351.5" ></text>
+</g>
+<g >
+<title>alloc::raw_vec::RawVec&lt;T,A&gt;::grow_one (92,540,058 samples, 0.03%)</title><rect x="201.4" y="2005" width="0.4" height="15.0" fill="rgb(248,200,47)" rx="2" ry="2" />
+<text  x="204.39" y="2015.5" ></text>
+</g>
+<g >
+<title>hashTupleDesc (109,587,595 samples, 0.04%)</title><rect x="676.8" y="2053" width="0.4" height="15.0" fill="rgb(254,226,54)" rx="2" ry="2" />
+<text  x="679.82" y="2063.5" ></text>
+</g>
+<g >
+<title>_int_free (108,311,788 samples, 0.04%)</title><rect x="266.7" y="2021" width="0.5" height="15.0" fill="rgb(247,196,46)" rx="2" ry="2" />
+<text  x="269.75" y="2031.5" ></text>
+</g>
+<g >
+<title>text_to_cstring (323,613,530 samples, 0.11%)</title><rect x="542.2" y="2037" width="1.3" height="15.0" fill="rgb(221,73,17)" rx="2" ry="2" />
+<text  x="545.21" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (61,052,989 samples, 0.02%)</title><rect x="137.6" y="2021" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="140.65" y="2031.5" ></text>
+</g>
+<g >
+<title>hashbrown::raw::RawTableInner::fallible_with_capacity (94,437,175 samples, 0.03%)</title><rect x="441.8" y="2037" width="0.4" height="15.0" fill="rgb(242,173,41)" rx="2" ry="2" />
+<text  x="444.78" y="2047.5" ></text>
+</g>
+<g >
+<title>tuplestore_puttuple (46,516,533 samples, 0.02%)</title><rect x="547.5" y="2037" width="0.2" height="15.0" fill="rgb(215,48,11)" rx="2" ry="2" />
+<text  x="550.54" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (21,550,402,167 samples, 7.24%)</title><rect x="290.4" y="1957" width="85.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="293.36" y="1967.5" >[[kernel.k..</text>
+</g>
+<g >
+<title>[unknown] (1,544,351,128 samples, 0.52%)</title><rect x="245.6" y="229" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.60" y="239.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1477" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1487.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::quotes::shared::mask_64::BlockClassifier64Bit::classify (295,785,623 samples, 0.10%)</title><rect x="1159.1" y="2037" width="1.2" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="1162.14" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="869" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="879.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="421" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="431.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (22,657,032,795 samples, 7.61%)</title><rect x="286.0" y="2021" width="89.7" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="288.98" y="2031.5" >[[kernel.k..</text>
+</g>
+<g >
+<title>CreateTupleDescCopyConstr (71,160,555 samples, 0.02%)</title><rect x="147.9" y="2037" width="0.3" height="15.0" fill="rgb(223,83,19)" rx="2" ry="2" />
+<text  x="150.88" y="2047.5" ></text>
+</g>
+<g >
+<title>ReadBuffer (44,664,670 samples, 0.01%)</title><rect x="183.2" y="2037" width="0.2" height="15.0" fill="rgb(219,68,16)" rx="2" ry="2" />
+<text  x="186.18" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1445" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1455.5" ></text>
+</g>
+<g >
+<title>get_hash_value (111,451,992 samples, 0.04%)</title><rect x="668.7" y="2053" width="0.4" height="15.0" fill="rgb(211,27,6)" rx="2" ry="2" />
+<text  x="671.65" y="2063.5" ></text>
+</g>
+<g >
+<title>CreateTemplateTupleDesc (88,648,268 samples, 0.03%)</title><rect x="147.5" y="2037" width="0.4" height="15.0" fill="rgb(218,61,14)" rx="2" ry="2" />
+<text  x="150.53" y="2047.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::structural::shared::vector_256::BlockClassifier256::toggle_colons_and_commas (76,395,382 samples, 0.03%)</title><rect x="1171.2" y="2021" width="0.3" height="15.0" fill="rgb(237,151,36)" rx="2" ry="2" />
+<text  x="1174.21" y="2031.5" ></text>
+</g>
+<g >
+<title>index_getnext_tid (143,686,850 samples, 0.05%)</title><rect x="281.9" y="2021" width="0.6" height="15.0" fill="rgb(245,185,44)" rx="2" ry="2" />
+<text  x="284.95" y="2031.5" ></text>
+</g>
+<g >
+<title>MemoryContextReset (534,191,322 samples, 0.18%)</title><rect x="97.6" y="2053" width="2.1" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text  x="100.57" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="597" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="607.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc13___rdl_realloc (43,970,511 samples, 0.01%)</title><rect x="550.6" y="2053" width="0.2" height="15.0" fill="rgb(222,82,19)" rx="2" ry="2" />
+<text  x="553.61" y="2063.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc11___rdl_alloc (113,948,079 samples, 0.04%)</title><rect x="284.4" y="2037" width="0.4" height="15.0" fill="rgb(224,90,21)" rx="2" ry="2" />
+<text  x="287.36" y="2047.5" ></text>
+</g>
+<g >
+<title>HeapTupleSatisfiesVisibility (270,469,729 samples, 0.09%)</title><rect x="173.1" y="2037" width="1.1" height="15.0" fill="rgb(234,136,32)" rx="2" ry="2" />
+<text  x="176.13" y="2047.5" ></text>
+</g>
+<g >
+<title>pgrx::memcxt::PgMemoryContexts::leak_and_drop_on_delete::drop_on_delete (118,455,625 samples, 0.04%)</title><rect x="466.8" y="2037" width="0.5" height="15.0" fill="rgb(254,229,54)" rx="2" ry="2" />
+<text  x="469.80" y="2047.5" ></text>
+</g>
+<g >
+<title>core::ptr::drop_in_place&lt;rsonpath_syntax::Segment&gt; (217,288,538 samples, 0.07%)</title><rect x="206.3" y="2005" width="0.8" height="15.0" fill="rgb(244,183,43)" rx="2" ry="2" />
+<text  x="209.28" y="2015.5" ></text>
+</g>
+<g >
+<title>ResourceOwnerEnlargeCatCacheRefs (62,125,248 samples, 0.02%)</title><rect x="245.6" y="37" width="0.3" height="15.0" fill="rgb(207,13,3)" rx="2" ry="2" />
+<text  x="248.64" y="47.5" ></text>
+</g>
+<g >
+<title>toast_decompress_datum (91,500,611 samples, 0.03%)</title><rect x="544.0" y="2037" width="0.3" height="15.0" fill="rgb(211,31,7)" rx="2" ry="2" />
+<text  x="546.97" y="2047.5" ></text>
+</g>
+<g >
+<title>heap_page_prune_opt (318,765,823 samples, 0.11%)</title><rect x="693.2" y="2053" width="1.3" height="15.0" fill="rgb(211,29,7)" rx="2" ry="2" />
+<text  x="696.24" y="2063.5" ></text>
+</g>
+<g >
+<title>core::ptr::drop_in_place&lt;rsonpath::engine::error::EngineError&gt; (72,229,727 samples, 0.02%)</title><rect x="429.3" y="2037" width="0.3" height="15.0" fill="rgb(233,129,30)" rx="2" ry="2" />
+<text  x="432.28" y="2047.5" ></text>
+</g>
+<g >
+<title>unlink_chunk.constprop.0 (123,770,212 samples, 0.04%)</title><rect x="548.9" y="2037" width="0.5" height="15.0" fill="rgb(222,80,19)" rx="2" ry="2" />
+<text  x="551.93" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (20,897,345,875 samples, 7.02%)</title><rect x="292.9" y="1941" width="82.8" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="295.95" y="1951.5" >[[kernel...</text>
+</g>
+<g >
+<title>btbeginscan (84,659,441 samples, 0.03%)</title><rect x="418.8" y="2037" width="0.3" height="15.0" fill="rgb(221,77,18)" rx="2" ry="2" />
+<text  x="421.80" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (38,250,266 samples, 0.01%)</title><rect x="500.9" y="1941" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="503.94" y="1951.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (51,773,433 samples, 0.02%)</title><rect x="1099.9" y="1845" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1102.88" y="1855.5" ></text>
+</g>
+<g >
+<title>malloc (32,432,080 samples, 0.01%)</title><rect x="207.1" y="2005" width="0.2" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="210.14" y="2015.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1397" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1407.5" ></text>
+</g>
+<g >
+<title>_int_realloc (100,988,984 samples, 0.03%)</title><rect x="415.3" y="2037" width="0.4" height="15.0" fill="rgb(230,117,28)" rx="2" ry="2" />
+<text  x="418.30" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="645" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="655.5" ></text>
+</g>
+<g >
+<title>std::env::_var (127,418,219 samples, 0.04%)</title><rect x="228.5" y="2005" width="0.5" height="15.0" fill="rgb(212,33,8)" rx="2" ry="2" />
+<text  x="231.51" y="2015.5" ></text>
+</g>
+<g >
+<title>textin (120,497,235 samples, 0.04%)</title><rect x="543.5" y="2037" width="0.5" height="15.0" fill="rgb(248,199,47)" rx="2" ry="2" />
+<text  x="546.49" y="2047.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc13___rdl_dealloc (37,211,108 samples, 0.01%)</title><rect x="285.0" y="2037" width="0.1" height="15.0" fill="rgb(213,38,9)" rx="2" ry="2" />
+<text  x="287.98" y="2047.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::quotes::shared::vector_256::classify_block (279,892,046 samples, 0.09%)</title><rect x="1160.3" y="2037" width="1.1" height="15.0" fill="rgb(232,128,30)" rx="2" ry="2" />
+<text  x="1163.31" y="2047.5" ></text>
+</g>
+<g >
+<title>hash_search_with_hash_value (1,418,385,112 samples, 0.48%)</title><rect x="273.4" y="2021" width="5.6" height="15.0" fill="rgb(249,205,49)" rx="2" ry="2" />
+<text  x="276.40" y="2031.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (1,367,534,330 samples, 0.46%)</title><rect x="359.2" y="1701" width="5.4" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="362.16" y="1711.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (8,912,425,440 samples, 2.99%)</title><rect x="340.2" y="1749" width="35.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="343.19" y="1759.5" >[[..</text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (209,578,485 samples, 0.07%)</title><rect x="628.2" y="2005" width="0.9" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="631.25" y="2015.5" ></text>
+</g>
+<g >
+<title>_mdfd_getseg (27,811,337 samples, 0.01%)</title><rect x="652.7" y="2053" width="0.1" height="15.0" fill="rgb(253,222,53)" rx="2" ry="2" />
+<text  x="655.67" y="2063.5" ></text>
+</g>
+<g >
+<title>pgstat_init_function_usage (140,468,818 samples, 0.05%)</title><rect x="1109.6" y="2053" width="0.6" height="15.0" fill="rgb(235,141,33)" rx="2" ry="2" />
+<text  x="1112.63" y="2063.5" ></text>
+</g>
+<g >
+<title>__tls_get_addr@plt (25,260,733 samples, 0.01%)</title><rect x="395.3" y="2037" width="0.1" height="15.0" fill="rgb(212,35,8)" rx="2" ry="2" />
+<text  x="398.28" y="2047.5" ></text>
+</g>
+<g >
+<title>MemoryContextResetOnly (121,474,833 samples, 0.04%)</title><rect x="181.0" y="2037" width="0.5" height="15.0" fill="rgb(210,25,6)" rx="2" ry="2" />
+<text  x="184.01" y="2047.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc13___rdl_realloc (95,558,311 samples, 0.03%)</title><rect x="657.4" y="2037" width="0.4" height="15.0" fill="rgb(222,82,19)" rx="2" ry="2" />
+<text  x="660.42" y="2047.5" ></text>
+</g>
+<g >
+<title>UnregisterExprContextCallback (427,192,045 samples, 0.14%)</title><rect x="237.9" y="2037" width="1.7" height="15.0" fill="rgb(227,103,24)" rx="2" ry="2" />
+<text  x="240.93" y="2047.5" ></text>
+</g>
+<g >
+<title>mdread (30,240,518 samples, 0.01%)</title><rect x="454.1" y="2037" width="0.1" height="15.0" fill="rgb(251,215,51)" rx="2" ry="2" />
+<text  x="457.11" y="2047.5" ></text>
+</g>
+<g >
+<title>_int_malloc (95,109,803 samples, 0.03%)</title><rect x="252.2" y="1957" width="0.4" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="255.24" y="1967.5" ></text>
+</g>
+<g >
+<title>&lt;core::iter::adapters::GenericShunt&lt;I,R&gt; as core::iter::traits::iterator::Iterator&gt;::next (981,930,928 samples, 0.33%)</title><rect x="111.7" y="2037" width="3.9" height="15.0" fill="rgb(238,154,36)" rx="2" ry="2" />
+<text  x="114.69" y="2047.5" ></text>
+</g>
+<g >
+<title>rsonpath::engine::main::Executor&lt;I,R,V&gt;::run_on_subtree::avx2_pclmulqdq_popcnt (13,218,792,710 samples, 4.44%)</title><rect x="483.3" y="2037" width="52.4" height="15.0" fill="rgb(231,123,29)" rx="2" ry="2" />
+<text  x="486.31" y="2047.5" >rsonp..</text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (105,089,094 samples, 0.04%)</title><rect x="1100.8" y="1893" width="0.4" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1103.77" y="1903.5" ></text>
+</g>
+<g >
+<title>rsonpath::automaton::nfa::NondeterministicAutomaton::new (745,851,557 samples, 0.25%)</title><rect x="471.9" y="2037" width="2.9" height="15.0" fill="rgb(254,226,54)" rx="2" ry="2" />
+<text  x="474.86" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (56,606,969 samples, 0.02%)</title><rect x="1133.3" y="2021" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1136.29" y="2031.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1333" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1343.5" ></text>
+</g>
+<g >
+<title>alloc::raw_vec::RawVecInner&lt;A&gt;::finish_grow (820,046,732 samples, 0.28%)</title><rect x="654.5" y="2053" width="3.3" height="15.0" fill="rgb(233,129,30)" rx="2" ry="2" />
+<text  x="657.55" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (58,858,128 samples, 0.02%)</title><rect x="1133.3" y="2037" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1136.28" y="2047.5" ></text>
+</g>
+<g >
+<title>&lt;rsonpath::result::nodes::NodesRecorder&lt;B,S&gt; as rsonpath::result::Recorder&lt;B&gt;&gt;::record_match (350,166,340 samples, 0.12%)</title><rect x="54.4" y="2053" width="1.3" height="15.0" fill="rgb(237,148,35)" rx="2" ry="2" />
+<text  x="57.36" y="2063.5" ></text>
+</g>
+<g >
+<title>build_function_result_tupdesc_d (429,680,339 samples, 0.14%)</title><rect x="419.2" y="2037" width="1.7" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="422.19" y="2047.5" ></text>
+</g>
+<g >
+<title>int4eqfast (29,890,842 samples, 0.01%)</title><rect x="251.6" y="37" width="0.1" height="15.0" fill="rgb(229,111,26)" rx="2" ry="2" />
+<text  x="254.60" y="47.5" ></text>
+</g>
+<g >
+<title>get_call_result_type (172,968,186 samples, 0.06%)</title><rect x="438.3" y="2037" width="0.7" height="15.0" fill="rgb(252,217,52)" rx="2" ry="2" />
+<text  x="441.29" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1061" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1071.5" ></text>
+</g>
+<g >
+<title>TupleDescInitEntry (93,575,979 samples, 0.03%)</title><rect x="107.7" y="2053" width="0.3" height="15.0" fill="rgb(233,132,31)" rx="2" ry="2" />
+<text  x="110.67" y="2063.5" ></text>
+</g>
+<g >
+<title>__memset_avx2_unaligned_erms (50,780,700 samples, 0.02%)</title><rect x="629.1" y="2053" width="0.2" height="15.0" fill="rgb(223,84,20)" rx="2" ry="2" />
+<text  x="632.08" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (2,013,989,698 samples, 0.68%)</title><rect x="366.9" y="1637" width="8.0" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="369.89" y="1647.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,561,822,319 samples, 0.52%)</title><rect x="245.6" y="1637" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1647.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1141" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1151.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,538,312,826 samples, 0.52%)</title><rect x="245.6" y="197" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.62" y="207.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="709" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="719.5" ></text>
+</g>
+<g >
+<title>cfree@GLIBC_2.2.5 (128,691,449 samples, 0.04%)</title><rect x="269.4" y="2021" width="0.5" height="15.0" fill="rgb(233,131,31)" rx="2" ry="2" />
+<text  x="272.37" y="2031.5" ></text>
+</g>
+<g >
+<title>_bt_relandgetbuf (42,334,258 samples, 0.01%)</title><rect x="403.4" y="2037" width="0.2" height="15.0" fill="rgb(219,64,15)" rx="2" ry="2" />
+<text  x="406.39" y="2047.5" ></text>
+</g>
+<g >
+<title>ExecScan (150,937,178 samples, 0.05%)</title><rect x="169.2" y="2037" width="0.6" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="172.16" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (20,341,904,379 samples, 6.83%)</title><rect x="295.1" y="1909" width="80.6" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="298.14" y="1919.5" >[[kernel...</text>
+</g>
+<g >
+<title>_int_malloc (26,557,425 samples, 0.01%)</title><rect x="253.9" y="1989" width="0.1" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="256.90" y="1999.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (26,098,359 samples, 0.01%)</title><rect x="687.9" y="2021" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="690.86" y="2031.5" ></text>
+</g>
+<g >
+<title>bms_overlap (138,665,902 samples, 0.05%)</title><rect x="418.3" y="2037" width="0.5" height="15.0" fill="rgb(253,224,53)" rx="2" ry="2" />
+<text  x="421.26" y="2047.5" ></text>
+</g>
+<g >
+<title>ResourceArrayRemove (594,896,357 samples, 0.20%)</title><rect x="240.9" y="2021" width="2.3" height="15.0" fill="rgb(218,60,14)" rx="2" ry="2" />
+<text  x="243.87" y="2031.5" ></text>
+</g>
+<g >
+<title>all (297,854,303,818 samples, 100%)</title><rect x="10.0" y="2085" width="1180.0" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="13.00" y="2095.5" ></text>
+</g>
+<g >
+<title>ExecNestLoop (1,142,970,761 samples, 0.38%)</title><rect x="160.6" y="2037" width="4.6" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="163.63" y="2047.5" ></text>
+</g>
+<g >
+<title>FreeTupleDesc (171,827,693 samples, 0.06%)</title><rect x="171.3" y="2037" width="0.7" height="15.0" fill="rgb(223,86,20)" rx="2" ry="2" />
+<text  x="174.34" y="2047.5" ></text>
+</g>
+<g >
+<title>&lt;rsonpath::input::padding::TwoSidesPaddedInput as rsonpath::input::SliceSeekable&gt;::seek_backward (102,198,894 samples, 0.03%)</title><rect x="53.0" y="2053" width="0.4" height="15.0" fill="rgb(212,35,8)" rx="2" ry="2" />
+<text  x="55.99" y="2063.5" ></text>
+</g>
+<g >
+<title>BufTableLookup (54,135,207 samples, 0.02%)</title><rect x="146.1" y="2037" width="0.2" height="15.0" fill="rgb(224,89,21)" rx="2" ry="2" />
+<text  x="149.10" y="2047.5" ></text>
+</g>
+<g >
+<title>SeqNext (114,575,977 samples, 0.04%)</title><rect x="232.8" y="2037" width="0.4" height="15.0" fill="rgb(214,41,10)" rx="2" ry="2" />
+<text  x="235.78" y="2047.5" ></text>
+</g>
+<g >
+<title>MakeTupleTableSlot (50,507,972 samples, 0.02%)</title><rect x="96.3" y="2053" width="0.2" height="15.0" fill="rgb(221,74,17)" rx="2" ry="2" />
+<text  x="99.27" y="2063.5" ></text>
+</g>
+<g >
+<title>&lt;pgrx::iter::TableIterator&lt;Row&gt; as pgrx::callconv::RetAbi&gt;::box_ret_in_fcinfo (280,418,473 samples, 0.09%)</title><rect x="48.1" y="2053" width="1.1" height="15.0" fill="rgb(222,81,19)" rx="2" ry="2" />
+<text  x="51.11" y="2063.5" ></text>
+</g>
+<g >
+<title>MemoryContextAlloc (114,854,561 samples, 0.04%)</title><rect x="96.5" y="2053" width="0.5" height="15.0" fill="rgb(215,49,11)" rx="2" ry="2" />
+<text  x="99.50" y="2063.5" ></text>
+</g>
+<g >
+<title>core::hash::BuildHasher::hash_one (377,365,496 samples, 0.13%)</title><rect x="427.4" y="2037" width="1.5" height="15.0" fill="rgb(250,209,50)" rx="2" ry="2" />
+<text  x="430.40" y="2047.5" ></text>
+</g>
+<g >
+<title>tupledesc_match (164,336,603 samples, 0.06%)</title><rect x="1184.3" y="2053" width="0.6" height="15.0" fill="rgb(248,201,48)" rx="2" ry="2" />
+<text  x="1187.27" y="2063.5" ></text>
+</g>
+<g >
+<title>hashbrown::raw::RawTable&lt;T,A&gt;::reserve_rehash (101,217,228 samples, 0.03%)</title><rect x="688.0" y="2053" width="0.4" height="15.0" fill="rgb(241,167,39)" rx="2" ry="2" />
+<text  x="690.97" y="2063.5" ></text>
+</g>
+<g >
+<title>PredicateLockPage (39,791,333 samples, 0.01%)</title><rect x="99.8" y="2053" width="0.1" height="15.0" fill="rgb(215,49,11)" rx="2" ry="2" />
+<text  x="102.79" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1221" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1231.5" ></text>
+</g>
+<g >
+<title>&lt;pgrx::iter::TableIterator&lt;Row&gt; as pgrx::callconv::RetAbi&gt;::to_ret (173,409,480 samples, 0.06%)</title><rect x="190.5" y="2021" width="0.6" height="15.0" fill="rgb(211,28,6)" rx="2" ry="2" />
+<text  x="193.46" y="2031.5" ></text>
+</g>
+<g >
+<title>pglz_decompress (86,137,130 samples, 0.03%)</title><rect x="463.9" y="2037" width="0.3" height="15.0" fill="rgb(217,59,14)" rx="2" ry="2" />
+<text  x="466.87" y="2047.5" ></text>
+</g>
+<g >
+<title>ScanKeyInit (64,863,747 samples, 0.02%)</title><rect x="105.7" y="2053" width="0.2" height="15.0" fill="rgb(222,79,18)" rx="2" ry="2" />
+<text  x="108.67" y="2063.5" ></text>
+</g>
+<g >
+<title>__memmove_avx_unaligned_erms (1,489,289,487 samples, 0.50%)</title><rect x="195.5" y="2005" width="5.9" height="15.0" fill="rgb(205,0,0)" rx="2" ry="2" />
+<text  x="198.49" y="2015.5" ></text>
+</g>
+<g >
+<title>ExecEvalFuncArgs (191,983,553 samples, 0.06%)</title><rect x="64.5" y="2053" width="0.8" height="15.0" fill="rgb(245,187,44)" rx="2" ry="2" />
+<text  x="67.52" y="2063.5" ></text>
+</g>
+<g >
+<title>pgrx::callconv::Arg::unbox_arg_using_from_datum (107,152,966 samples, 0.04%)</title><rect x="464.2" y="2037" width="0.4" height="15.0" fill="rgb(226,97,23)" rx="2" ry="2" />
+<text  x="467.21" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="981" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="991.5" ></text>
+</g>
+<g >
+<title>cee_scape::asm_based::call_with_sigsetjmp::call_from_c_to_rust (25,507,604 samples, 0.01%)</title><rect x="254.4" y="1989" width="0.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="257.37" y="1999.5" ></text>
+</g>
+<g >
+<title>heap_hot_search_buffer (192,764,790 samples, 0.06%)</title><rect x="692.5" y="2053" width="0.7" height="15.0" fill="rgb(244,182,43)" rx="2" ry="2" />
+<text  x="695.47" y="2063.5" ></text>
+</g>
+<g >
+<title>core::ffi::c_str::CStr::from_bytes_with_nul (290,643,983 samples, 0.10%)</title><rect x="210.1" y="1973" width="1.2" height="15.0" fill="rgb(238,155,37)" rx="2" ry="2" />
+<text  x="213.13" y="1983.5" ></text>
+</g>
+<g >
+<title>_bt_binsrch (300,871,932 samples, 0.10%)</title><rect x="395.4" y="2037" width="1.2" height="15.0" fill="rgb(241,166,39)" rx="2" ry="2" />
+<text  x="398.38" y="2047.5" ></text>
+</g>
+<g >
+<title>ReindexIsProcessingIndex (37,867,627 samples, 0.01%)</title><rect x="185.3" y="2037" width="0.2" height="15.0" fill="rgb(246,190,45)" rx="2" ry="2" />
+<text  x="188.30" y="2047.5" ></text>
+</g>
+<g >
+<title>StrategyGetBuffer (162,490,101 samples, 0.05%)</title><rect x="234.7" y="2037" width="0.7" height="15.0" fill="rgb(216,54,13)" rx="2" ry="2" />
+<text  x="237.72" y="2047.5" ></text>
+</g>
+<g >
+<title>_bt_compare (1,096,876,098 samples, 0.37%)</title><rect x="396.9" y="2037" width="4.4" height="15.0" fill="rgb(254,225,53)" rx="2" ry="2" />
+<text  x="399.91" y="2047.5" ></text>
+</g>
+<g >
+<title>SIGetDataEntries (68,059,094 samples, 0.02%)</title><rect x="230.5" y="2037" width="0.3" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="233.52" y="2047.5" ></text>
+</g>
+<g >
+<title>LWLockRelease (797,002,922 samples, 0.27%)</title><rect x="88.6" y="2053" width="3.2" height="15.0" fill="rgb(217,58,13)" rx="2" ry="2" />
+<text  x="91.59" y="2063.5" ></text>
+</g>
+<g >
+<title>pgstat_end_function_usage (45,886,645 samples, 0.02%)</title><rect x="469.7" y="2037" width="0.1" height="15.0" fill="rgb(243,175,41)" rx="2" ry="2" />
+<text  x="472.65" y="2047.5" ></text>
+</g>
+<g >
+<title>heap_fill_tuple (139,813,200 samples, 0.05%)</title><rect x="279.0" y="2021" width="0.6" height="15.0" fill="rgb(250,209,50)" rx="2" ry="2" />
+<text  x="282.02" y="2031.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,539,414,317 samples, 0.52%)</title><rect x="245.6" y="213" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.62" y="223.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1573" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1583.5" ></text>
+</g>
+<g >
+<title>RelationIdGetRelation (119,115,375 samples, 0.04%)</title><rect x="102.7" y="2053" width="0.4" height="15.0" fill="rgb(212,32,7)" rx="2" ry="2" />
+<text  x="105.67" y="2063.5" ></text>
+</g>
+<g >
+<title>new_list (28,255,689 samples, 0.01%)</title><rect x="728.6" y="2053" width="0.1" height="15.0" fill="rgb(249,206,49)" rx="2" ry="2" />
+<text  x="731.57" y="2063.5" ></text>
+</g>
+<g >
+<title>pgrx_pg_sys::submodules::thread_check::check_active_thread (120,823,558 samples, 0.04%)</title><rect x="262.3" y="2005" width="0.5" height="15.0" fill="rgb(229,113,27)" rx="2" ry="2" />
+<text  x="265.28" y="2015.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (398,407,755 samples, 0.13%)</title><rect x="1098.6" y="1893" width="1.5" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1101.56" y="1903.5" ></text>
+</g>
+<g >
+<title>ReleaseAndReadBuffer (56,072,291 samples, 0.02%)</title><rect x="103.2" y="2053" width="0.2" height="15.0" fill="rgb(239,157,37)" rx="2" ry="2" />
+<text  x="106.20" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (108,733,645 samples, 0.04%)</title><rect x="364.1" y="1637" width="0.4" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="367.10" y="1647.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (89,826,754 samples, 0.03%)</title><rect x="628.5" y="1909" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="631.45" y="1919.5" ></text>
+</g>
+<g >
+<title>_int_realloc (472,148,103 samples, 0.16%)</title><rect x="650.8" y="2053" width="1.9" height="15.0" fill="rgb(230,117,28)" rx="2" ry="2" />
+<text  x="653.80" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (25,607,405 samples, 0.01%)</title><rect x="628.9" y="1893" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="631.85" y="1903.5" ></text>
+</g>
+<g >
+<title>_bt_readpage (221,102,193 samples, 0.07%)</title><rect x="637.4" y="2053" width="0.9" height="15.0" fill="rgb(224,88,21)" rx="2" ry="2" />
+<text  x="640.39" y="2063.5" ></text>
+</g>
+<g >
+<title>ExecStoreBufferHeapTuple (136,962,952 samples, 0.05%)</title><rect x="170.5" y="2037" width="0.5" height="15.0" fill="rgb(230,117,28)" rx="2" ry="2" />
+<text  x="173.48" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,561,822,319 samples, 0.52%)</title><rect x="245.6" y="1685" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1695.5" ></text>
+</g>
+<g >
+<title>core::ptr::drop_in_place&lt;rsonpath::automaton::StateTable&gt; (511,466,405 samples, 0.17%)</title><rect x="204.2" y="2005" width="2.1" height="15.0" fill="rgb(243,175,42)" rx="2" ry="2" />
+<text  x="207.25" y="2015.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1429" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1439.5" ></text>
+</g>
+<g >
+<title>LockBufHdr (220,463,263 samples, 0.07%)</title><rect x="176.1" y="2037" width="0.9" height="15.0" fill="rgb(236,143,34)" rx="2" ry="2" />
+<text  x="179.10" y="2047.5" ></text>
+</g>
+<g >
+<title>__memcmp_avx2_movbe (896,720,032 samples, 0.30%)</title><rect x="551.7" y="2053" width="3.5" height="15.0" fill="rgb(224,91,21)" rx="2" ry="2" />
+<text  x="554.68" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (59,387,475 samples, 0.02%)</title><rect x="533.9" y="1957" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="536.93" y="1967.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="453" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="463.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::quotes::shared::vector_256::classify_block (647,192,146 samples, 0.22%)</title><rect x="480.7" y="2037" width="2.6" height="15.0" fill="rgb(232,128,30)" rx="2" ry="2" />
+<text  x="483.75" y="2047.5" ></text>
+</g>
+<g >
+<title>heap_compute_data_size (29,700,438 samples, 0.01%)</title><rect x="442.5" y="2037" width="0.1" height="15.0" fill="rgb(245,188,45)" rx="2" ry="2" />
+<text  x="445.47" y="2047.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::structural::avx2_64::BlockAvx2Classifier64::new (88,318,886 samples, 0.03%)</title><rect x="216.3" y="2005" width="0.3" height="15.0" fill="rgb(210,27,6)" rx="2" ry="2" />
+<text  x="219.26" y="2015.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (44,115,775 samples, 0.01%)</title><rect x="500.9" y="1973" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="503.91" y="1983.5" ></text>
+</g>
+<g >
+<title>systable_getnext_ordered (95,590,034 samples, 0.03%)</title><rect x="1181.1" y="2053" width="0.4" height="15.0" fill="rgb(218,60,14)" rx="2" ry="2" />
+<text  x="1184.07" y="2063.5" ></text>
+</g>
+<g >
+<title>__sigsetjmp (635,560,064 samples, 0.21%)</title><rect x="386.7" y="2037" width="2.5" height="15.0" fill="rgb(242,172,41)" rx="2" ry="2" />
+<text  x="389.72" y="2047.5" ></text>
+</g>
+<g >
+<title>UnpinBuffer.constprop.0 (186,893,530 samples, 0.06%)</title><rect x="237.2" y="2037" width="0.7" height="15.0" fill="rgb(238,153,36)" rx="2" ry="2" />
+<text  x="240.19" y="2047.5" ></text>
+</g>
+<g >
+<title>cfree@GLIBC_2.2.5 (1,204,547,227 samples, 0.40%)</title><rect x="662.7" y="2053" width="4.7" height="15.0" fill="rgb(233,131,31)" rx="2" ry="2" />
+<text  x="665.67" y="2063.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc12___rust_alloc (42,895,091 samples, 0.01%)</title><rect x="284.8" y="2037" width="0.2" height="15.0" fill="rgb(213,41,9)" rx="2" ry="2" />
+<text  x="287.81" y="2047.5" ></text>
+</g>
+<g >
+<title>heap_getnextslot (325,320,861 samples, 0.11%)</title><rect x="442.9" y="2037" width="1.3" height="15.0" fill="rgb(213,40,9)" rx="2" ry="2" />
+<text  x="445.91" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (44,653,742 samples, 0.01%)</title><rect x="500.9" y="1989" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="503.91" y="1999.5" ></text>
+</g>
+<g >
+<title>toast_open_indexes (35,760,207 samples, 0.01%)</title><rect x="262.8" y="2005" width="0.1" height="15.0" fill="rgb(239,158,37)" rx="2" ry="2" />
+<text  x="265.77" y="2015.5" ></text>
+</g>
+<g >
+<title>ResourceOwnerRememberCatCacheRef (47,367,059 samples, 0.02%)</title><rect x="245.9" y="37" width="0.2" height="15.0" fill="rgb(220,72,17)" rx="2" ry="2" />
+<text  x="248.89" y="47.5" ></text>
+</g>
+<g >
+<title>hash_search_with_hash_value (76,510,385 samples, 0.03%)</title><rect x="440.9" y="2037" width="0.3" height="15.0" fill="rgb(249,205,49)" rx="2" ry="2" />
+<text  x="443.88" y="2047.5" ></text>
+</g>
+<g >
+<title>heap_hot_search_buffer (60,581,974 samples, 0.02%)</title><rect x="444.2" y="2037" width="0.2" height="15.0" fill="rgb(244,182,43)" rx="2" ry="2" />
+<text  x="447.19" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="629" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="639.5" ></text>
+</g>
+<g >
+<title>CatalogCacheComputeHashValue (215,476,679 samples, 0.07%)</title><rect x="146.5" y="2037" width="0.9" height="15.0" fill="rgb(245,185,44)" rx="2" ry="2" />
+<text  x="149.55" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (222,879,010 samples, 0.07%)</title><rect x="628.2" y="2037" width="0.9" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="631.20" y="2047.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc35___rust_no_alloc_shim_is_unstable_v2 (62,362,186 samples, 0.02%)</title><rect x="285.3" y="2037" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="288.29" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,537,227,125 samples, 0.52%)</title><rect x="245.6" y="149" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.63" y="159.5" ></text>
+</g>
+<g >
+<title>mdread (61,974,102 samples, 0.02%)</title><rect x="723.2" y="2053" width="0.2" height="15.0" fill="rgb(251,215,51)" rx="2" ry="2" />
+<text  x="726.16" y="2063.5" ></text>
+</g>
+<g >
+<title>&lt;rsonpath::automaton::array_transition_set::ArrayTransitionSet as core::iter::traits::collect::IntoIterator&gt;::into_iter (184,900,047 samples, 0.06%)</title><rect x="49.2" y="2053" width="0.8" height="15.0" fill="rgb(240,164,39)" rx="2" ry="2" />
+<text  x="52.22" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,547,406,221 samples, 0.52%)</title><rect x="245.6" y="261" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.59" y="271.5" ></text>
+</g>
+<g >
+<title>__memset_avx2_unaligned_erms (241,842,886 samples, 0.08%)</title><rect x="385.4" y="2037" width="1.0" height="15.0" fill="rgb(223,84,20)" rx="2" ry="2" />
+<text  x="388.39" y="2047.5" ></text>
+</g>
+<g >
+<title>AllocSetAlloc (4,670,850,556 samples, 1.57%)</title><rect x="119.4" y="2037" width="18.5" height="15.0" fill="rgb(231,124,29)" rx="2" ry="2" />
+<text  x="122.38" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,561,822,319 samples, 0.52%)</title><rect x="245.6" y="1813" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1823.5" ></text>
+</g>
+<g >
+<title>_bt_fix_scankey_strategy (84,525,005 samples, 0.03%)</title><rect x="264.8" y="2021" width="0.3" height="15.0" fill="rgb(214,45,10)" rx="2" ry="2" />
+<text  x="267.81" y="2031.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1525" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1535.5" ></text>
+</g>
+<g >
+<title>__strncpy_avx2 (408,859,423 samples, 0.14%)</title><rect x="630.0" y="2053" width="1.6" height="15.0" fill="rgb(251,213,51)" rx="2" ry="2" />
+<text  x="632.96" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (52,332,154 samples, 0.02%)</title><rect x="1158.7" y="2021" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1161.74" y="2031.5" ></text>
+</g>
+<g >
+<title>cee_scape::asm_based::call_with_sigsetjmp::call_from_c_to_rust (520,906,115 samples, 0.17%)</title><rect x="424.3" y="2037" width="2.0" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="427.28" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,561,822,319 samples, 0.52%)</title><rect x="245.6" y="1733" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1743.5" ></text>
+</g>
+<g >
+<title>rsonpath::engine::tail_skipping::TailSkip&lt;I,&lt;V as rsonpath::classification::simd::Simd&gt;::QuotesClassifier&lt;I&gt;,&lt;V as rsonpath::classification::simd::Simd&gt;::StructuralClassifier&lt;I&gt;,V,64_usize&gt;::skip::avx2_pclmulqdq_popcnt (5,788,899,553 samples, 1.94%)</title><rect x="512.3" y="2021" width="22.9" height="15.0" fill="rgb(222,79,18)" rx="2" ry="2" />
+<text  x="515.26" y="2031.5" >r..</text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (56,606,969 samples, 0.02%)</title><rect x="1133.3" y="2005" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1136.29" y="2015.5" ></text>
+</g>
+<g >
+<title>assign_record_type_typmod (27,306,813 samples, 0.01%)</title><rect x="268.9" y="2021" width="0.2" height="15.0" fill="rgb(249,204,48)" rx="2" ry="2" />
+<text  x="271.95" y="2031.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (970,990,844 samples, 0.33%)</title><rect x="1097.5" y="1989" width="3.8" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1100.47" y="1999.5" ></text>
+</g>
+<g >
+<title>index_rescan (82,019,551 samples, 0.03%)</title><rect x="446.4" y="2037" width="0.3" height="15.0" fill="rgb(228,109,26)" rx="2" ry="2" />
+<text  x="449.36" y="2047.5" ></text>
+</g>
+<g >
+<title>RegisterExprContextCallback (28,878,764 samples, 0.01%)</title><rect x="245.5" y="2005" width="0.1" height="15.0" fill="rgb(243,178,42)" rx="2" ry="2" />
+<text  x="248.46" y="2015.5" ></text>
+</g>
+<g >
+<title>alloc::raw_vec::RawVecInner&lt;A&gt;::finish_grow (78,177,786 samples, 0.03%)</title><rect x="268.6" y="2021" width="0.3" height="15.0" fill="rgb(233,129,30)" rx="2" ry="2" />
+<text  x="271.64" y="2031.5" ></text>
+</g>
+<g >
+<title>LockRelease (32,705,297 samples, 0.01%)</title><rect x="177.4" y="2037" width="0.1" height="15.0" fill="rgb(220,71,17)" rx="2" ry="2" />
+<text  x="180.38" y="2047.5" ></text>
+</g>
+<g >
+<title>core::ptr::drop_in_place&lt;nom::internal::Err&lt;rsonpath_syntax::error::InternalParseError&gt;&gt; (53,397,030 samples, 0.02%)</title><rect x="667.4" y="2053" width="0.3" height="15.0" fill="rgb(235,141,33)" rx="2" ry="2" />
+<text  x="670.44" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (26,734,135 samples, 0.01%)</title><rect x="1158.8" y="1941" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1161.76" y="1951.5" ></text>
+</g>
+<g >
+<title>ExecStoreMinimalTuple (29,227,831 samples, 0.01%)</title><rect x="240.3" y="2021" width="0.1" height="15.0" fill="rgb(244,180,43)" rx="2" ry="2" />
+<text  x="243.31" y="2031.5" ></text>
+</g>
+<g >
+<title>pgrx_pg_sys::submodules::thread_check::check_active_thread (134,710,732 samples, 0.05%)</title><rect x="1108.6" y="2053" width="0.5" height="15.0" fill="rgb(229,113,27)" rx="2" ry="2" />
+<text  x="1111.59" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,561,822,319 samples, 0.52%)</title><rect x="245.6" y="1877" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1887.5" ></text>
+</g>
+<g >
+<title>malloc (4,541,539,884 samples, 1.52%)</title><rect x="698.0" y="2053" width="18.0" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="701.03" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (327,681,176 samples, 0.11%)</title><rect x="1098.8" y="1877" width="1.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1101.84" y="1887.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (25,422,907 samples, 0.01%)</title><rect x="676.7" y="2021" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="679.71" y="2031.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (28,583,429 samples, 0.01%)</title><rect x="414.4" y="2005" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="417.38" y="2015.5" ></text>
+</g>
+<g >
+<title>pgrx_pg_sys::submodules::panic::run_guarded (444,736,132 samples, 0.15%)</title><rect x="467.5" y="2037" width="1.8" height="15.0" fill="rgb(209,22,5)" rx="2" ry="2" />
+<text  x="470.54" y="2047.5" ></text>
+</g>
+<g >
+<title>alloc::string::String::from_utf8_lossy (117,388,351 samples, 0.04%)</title><rect x="1108.1" y="2037" width="0.5" height="15.0" fill="rgb(226,96,23)" rx="2" ry="2" />
+<text  x="1111.13" y="2047.5" ></text>
+</g>
+<g >
+<title>__libc_pread (22,768,741,355 samples, 7.64%)</title><rect x="285.5" y="2037" width="90.2" height="15.0" fill="rgb(238,156,37)" rx="2" ry="2" />
+<text  x="288.53" y="2047.5" >__libc_pread</text>
+</g>
+<g >
+<title>cee_scape::asm_based::call_with_sigsetjmp (435,827,738 samples, 0.15%)</title><rect x="660.5" y="2053" width="1.7" height="15.0" fill="rgb(232,127,30)" rx="2" ry="2" />
+<text  x="663.52" y="2063.5" ></text>
+</g>
+<g >
+<title>std::env::_var (1,682,707,643 samples, 0.56%)</title><rect x="209.4" y="1989" width="6.6" height="15.0" fill="rgb(212,33,8)" rx="2" ry="2" />
+<text  x="212.38" y="1999.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (550,942,109 samples, 0.18%)</title><rect x="1098.0" y="1941" width="2.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1100.96" y="1951.5" ></text>
+</g>
+<g >
+<title>ReadBuffer_common (239,441,261 samples, 0.08%)</title><rect x="100.6" y="2053" width="1.0" height="15.0" fill="rgb(213,40,9)" rx="2" ry="2" />
+<text  x="103.61" y="2063.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::structural::StructuralImpl::resume (141,129,175 samples, 0.05%)</title><rect x="534.2" y="2005" width="0.5" height="15.0" fill="rgb(237,149,35)" rx="2" ry="2" />
+<text  x="537.16" y="2015.5" ></text>
+</g>
+<g >
+<title>TupleDescInitEntry (191,987,760 samples, 0.06%)</title><rect x="236.4" y="2037" width="0.8" height="15.0" fill="rgb(233,132,31)" rx="2" ry="2" />
+<text  x="239.41" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,561,822,319 samples, 0.52%)</title><rect x="245.6" y="1653" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1663.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc14___rust_dealloc (31,300,307 samples, 0.01%)</title><rect x="195.3" y="2005" width="0.1" height="15.0" fill="rgb(252,218,52)" rx="2" ry="2" />
+<text  x="198.32" y="2015.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (442,982,442 samples, 0.15%)</title><rect x="362.8" y="1669" width="1.8" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="365.80" y="1679.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::quotes::shared::mask_64::BlockClassifier64Bit::classify (152,593,008 samples, 0.05%)</title><rect x="1135.9" y="2053" width="0.7" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="1138.95" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="821" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="831.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (72,219,260 samples, 0.02%)</title><rect x="628.5" y="1877" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="631.52" y="1887.5" ></text>
+</g>
+<g >
+<title>tag_hash (36,145,384 samples, 0.01%)</title><rect x="1181.5" y="2053" width="0.2" height="15.0" fill="rgb(245,185,44)" rx="2" ry="2" />
+<text  x="1184.55" y="2063.5" ></text>
+</g>
+<g >
+<title>lookup_rowtype_tupdesc_internal (253,056,212 samples, 0.08%)</title><rect x="697.0" y="2053" width="1.0" height="15.0" fill="rgb(219,67,16)" rx="2" ry="2" />
+<text  x="700.03" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (57,452,094 samples, 0.02%)</title><rect x="1101.0" y="1813" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1103.96" y="1823.5" ></text>
+</g>
+<g >
+<title>AllocSetFree (326,421,671 samples, 0.11%)</title><rect x="61.2" y="2053" width="1.3" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="64.17" y="2063.5" ></text>
+</g>
+<g >
+<title>LockBufHdr (290,418,361 samples, 0.10%)</title><rect x="93.6" y="2053" width="1.1" height="15.0" fill="rgb(236,143,34)" rx="2" ry="2" />
+<text  x="96.59" y="2063.5" ></text>
+</g>
+<g >
+<title>&lt;alloc::string::String as core::clone::Clone&gt;::clone (40,738,324 samples, 0.01%)</title><rect x="109.5" y="2037" width="0.2" height="15.0" fill="rgb(217,57,13)" rx="2" ry="2" />
+<text  x="112.52" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (19,032,722,168 samples, 6.39%)</title><rect x="300.3" y="1877" width="75.4" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="303.31" y="1887.5" >[[kernel..</text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1317" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1327.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::depth::DepthImpl::resume (48,744,078 samples, 0.02%)</title><rect x="1158.9" y="2037" width="0.2" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="1161.94" y="2047.5" ></text>
+</g>
+<g >
+<title>AllocSetGetChunkSpace (116,031,636 samples, 0.04%)</title><rect x="62.5" y="2053" width="0.4" height="15.0" fill="rgb(252,219,52)" rx="2" ry="2" />
+<text  x="65.46" y="2063.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::depth::shared::vector_256::DelimiterClassifierImpl256::get_opening_and_closing_masks (224,834,836 samples, 0.08%)</title><rect x="1135.1" y="2053" width="0.8" height="15.0" fill="rgb(229,114,27)" rx="2" ry="2" />
+<text  x="1138.05" y="2063.5" ></text>
+</g>
+<g >
+<title>_int_free (68,954,743 samples, 0.02%)</title><rect x="258.1" y="2005" width="0.2" height="15.0" fill="rgb(247,196,46)" rx="2" ry="2" />
+<text  x="261.08" y="2015.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::quotes::shared::vector_256::classify_block (1,121,102,206 samples, 0.38%)</title><rect x="507.8" y="2021" width="4.4" height="15.0" fill="rgb(232,128,30)" rx="2" ry="2" />
+<text  x="510.80" y="2031.5" ></text>
+</g>
+<g >
+<title>_int_malloc (203,870,744 samples, 0.07%)</title><rect x="414.5" y="2037" width="0.8" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="417.49" y="2047.5" ></text>
+</g>
+<g >
+<title>ReceiveSharedInvalidMessages (68,728,255 samples, 0.02%)</title><rect x="185.0" y="2037" width="0.3" height="15.0" fill="rgb(211,27,6)" rx="2" ry="2" />
+<text  x="188.03" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (27,635,888 samples, 0.01%)</title><rect x="534.0" y="1877" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="536.99" y="1887.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (28,498,723 samples, 0.01%)</title><rect x="650.7" y="1957" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="653.69" y="1967.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (50,647,295 samples, 0.02%)</title><rect x="1158.7" y="1973" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1161.74" y="1983.5" ></text>
+</g>
+<g >
+<title>pgrx::datum::from::convert_varlena_to_str_memoized (290,878,806 samples, 0.10%)</title><rect x="464.6" y="2037" width="1.2" height="15.0" fill="rgb(243,179,42)" rx="2" ry="2" />
+<text  x="467.64" y="2047.5" ></text>
+</g>
+<g >
+<title>ResourceOwnerRememberCatCacheRef (79,431,473 samples, 0.03%)</title><rect x="104.6" y="2053" width="0.3" height="15.0" fill="rgb(220,72,17)" rx="2" ry="2" />
+<text  x="107.61" y="2063.5" ></text>
+</g>
+<g >
+<title>BlessTupleDesc (146,980,022 samples, 0.05%)</title><rect x="145.4" y="2037" width="0.6" height="15.0" fill="rgb(205,0,0)" rx="2" ry="2" />
+<text  x="148.42" y="2047.5" ></text>
+</g>
+<g >
+<title>FunctionNext (353,844,102 samples, 0.12%)</title><rect x="76.1" y="2053" width="1.4" height="15.0" fill="rgb(219,65,15)" rx="2" ry="2" />
+<text  x="79.07" y="2063.5" ></text>
+</g>
+<g >
+<title>__strlen_avx2 (64,390,748 samples, 0.02%)</title><rect x="211.8" y="1957" width="0.2" height="15.0" fill="rgb(246,188,45)" rx="2" ry="2" />
+<text  x="214.77" y="1967.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (56,217,180 samples, 0.02%)</title><rect x="715.8" y="2005" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="718.80" y="2015.5" ></text>
+</g>
+<g >
+<title>bms_make_singleton (91,589,939 samples, 0.03%)</title><rect x="659.3" y="2053" width="0.3" height="15.0" fill="rgb(207,11,2)" rx="2" ry="2" />
+<text  x="662.27" y="2063.5" ></text>
+</g>
+<g >
+<title>rsonpath_syntax::parser::parse_with_options (1,206,084,557 samples, 0.40%)</title><rect x="1175.9" y="2053" width="4.8" height="15.0" fill="rgb(252,217,51)" rx="2" ry="2" />
+<text  x="1178.92" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,561,822,319 samples, 0.52%)</title><rect x="245.6" y="1717" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1727.5" ></text>
+</g>
+<g >
+<title>_bt_parallel_done (85,317,745 samples, 0.03%)</title><rect x="265.6" y="2021" width="0.3" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="268.56" y="2031.5" ></text>
+</g>
+<g >
+<title>relation_open (82,395,811 samples, 0.03%)</title><rect x="471.5" y="2037" width="0.3" height="15.0" fill="rgb(227,105,25)" rx="2" ry="2" />
+<text  x="474.50" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (203,599,796 samples, 0.07%)</title><rect x="628.3" y="1989" width="0.8" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="631.27" y="1999.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="661" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="671.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (4,565,854,398 samples, 1.53%)</title><rect x="346.5" y="1733" width="18.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="349.49" y="1743.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1189" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1199.5" ></text>
+</g>
+<g >
+<title>__memmove_avx_unaligned_erms (2,437,855,730 samples, 0.82%)</title><rect x="375.7" y="2037" width="9.7" height="15.0" fill="rgb(205,0,0)" rx="2" ry="2" />
+<text  x="378.74" y="2047.5" ></text>
+</g>
+<g >
+<title>alloc::string::String::from_utf8_lossy (79,109,782 samples, 0.03%)</title><rect x="658.6" y="2053" width="0.3" height="15.0" fill="rgb(226,96,23)" rx="2" ry="2" />
+<text  x="661.59" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (61,543,231 samples, 0.02%)</title><rect x="533.9" y="1989" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="536.92" y="1999.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (1,875,249,853 samples, 0.63%)</title><rect x="367.4" y="1621" width="7.5" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="370.44" y="1631.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1493" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1503.5" ></text>
+</g>
+<g >
+<title>palloc (123,087,900 samples, 0.04%)</title><rect x="728.9" y="2053" width="0.5" height="15.0" fill="rgb(211,29,7)" rx="2" ry="2" />
+<text  x="731.89" y="2063.5" ></text>
+</g>
+<g >
+<title>&lt;rsonpath::input::padding::TwoSidesPaddedInput as rsonpath::input::SliceSeekable&gt;::is_member_match (541,832,469 samples, 0.18%)</title><rect x="50.8" y="2053" width="2.2" height="15.0" fill="rgb(210,27,6)" rx="2" ry="2" />
+<text  x="53.84" y="2063.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::depth::DepthImpl::resume (34,294,462 samples, 0.01%)</title><rect x="501.1" y="2021" width="0.1" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="504.09" y="2031.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::depth::DepthImpl::resume (362,365,457 samples, 0.12%)</title><rect x="1133.6" y="2053" width="1.5" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="1136.62" y="2063.5" ></text>
+</g>
+<g >
+<title>getenv (575,823,630 samples, 0.19%)</title><rect x="212.0" y="1957" width="2.3" height="15.0" fill="rgb(221,73,17)" rx="2" ry="2" />
+<text  x="215.03" y="1967.5" ></text>
+</g>
+<g >
+<title>&lt;rsonpath::input::borrowed::BorrowedBytesBlockIterator&lt;rsonpath::input::padding::TwoSidesPaddedInput,R,_&gt; as rsonpath::input::InputBlockIterator&lt;_&gt;&gt;::next::cold_path (181,688,020 samples, 0.06%)</title><rect x="500.2" y="2021" width="0.7" height="15.0" fill="rgb(218,63,15)" rx="2" ry="2" />
+<text  x="503.19" y="2031.5" ></text>
+</g>
+<g >
+<title>heapgetpage (43,650,102 samples, 0.01%)</title><rect x="695.1" y="2053" width="0.2" height="15.0" fill="rgb(254,225,53)" rx="2" ry="2" />
+<text  x="698.11" y="2063.5" ></text>
+</g>
+<g >
+<title>init_MultiFuncCall (162,625,892 samples, 0.05%)</title><rect x="260.9" y="2005" width="0.7" height="15.0" fill="rgb(241,169,40)" rx="2" ry="2" />
+<text  x="263.91" y="2015.5" ></text>
+</g>
+<g >
+<title>SysCacheGetAttr (173,469,888 samples, 0.06%)</title><rect x="106.2" y="2053" width="0.7" height="15.0" fill="rgb(214,42,10)" rx="2" ry="2" />
+<text  x="109.20" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,561,822,319 samples, 0.52%)</title><rect x="245.6" y="1765" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1775.5" ></text>
+</g>
+<g >
+<title>pgrx::callconv::Arg::unbox_arg_using_from_datum (140,754,150 samples, 0.05%)</title><rect x="191.9" y="2021" width="0.6" height="15.0" fill="rgb(226,97,23)" rx="2" ry="2" />
+<text  x="194.89" y="2031.5" ></text>
+</g>
+<g >
+<title>tts_virtual_clear (337,056,724 samples, 0.11%)</title><rect x="545.6" y="2037" width="1.3" height="15.0" fill="rgb(235,140,33)" rx="2" ry="2" />
+<text  x="548.58" y="2047.5" ></text>
+</g>
+<g >
+<title>tuplestore_rescan (72,293,602 samples, 0.02%)</title><rect x="1187.3" y="2053" width="0.2" height="15.0" fill="rgb(214,43,10)" rx="2" ry="2" />
+<text  x="1190.26" y="2063.5" ></text>
+</g>
+<g >
+<title>ResourceOwnerEnlargeTupleDescs (77,024,302 samples, 0.03%)</title><rect x="230.0" y="2037" width="0.3" height="15.0" fill="rgb(234,137,32)" rx="2" ry="2" />
+<text  x="232.99" y="2047.5" ></text>
+</g>
+<g >
+<title>vector_map::VecMap&lt;K,V&gt;::insert (44,932,497 samples, 0.02%)</title><rect x="229.0" y="2005" width="0.2" height="15.0" fill="rgb(212,34,8)" rx="2" ry="2" />
+<text  x="232.02" y="2015.5" ></text>
+</g>
+<g >
+<title>rsonpath::automaton::nfa::NondeterministicAutomaton::new (73,453,877 samples, 0.02%)</title><rect x="208.4" y="2005" width="0.3" height="15.0" fill="rgb(254,226,54)" rx="2" ry="2" />
+<text  x="211.38" y="2015.5" ></text>
+</g>
+<g >
+<title>ExecFetchSlotHeapTuple (85,523,671 samples, 0.03%)</title><rect x="65.3" y="2053" width="0.3" height="15.0" fill="rgb(245,185,44)" rx="2" ry="2" />
+<text  x="68.28" y="2063.5" ></text>
+</g>
+<g >
+<title>__strlen_avx2 (964,789,530 samples, 0.32%)</title><rect x="390.3" y="2037" width="3.8" height="15.0" fill="rgb(246,188,45)" rx="2" ry="2" />
+<text  x="393.33" y="2047.5" ></text>
+</g>
+<g >
+<title>pg_detoast_datum_packed (190,305,383 samples, 0.06%)</title><rect x="463.1" y="2037" width="0.8" height="15.0" fill="rgb(238,155,37)" rx="2" ry="2" />
+<text  x="466.12" y="2047.5" ></text>
+</g>
+<g >
+<title>std::sys::env::unix::getenv::_$u7b$$u7b$closure$u7d$$u7d$::h7dd91abadbbdb17b (366,882,848 samples, 0.12%)</title><rect x="214.3" y="1957" width="1.5" height="15.0" fill="rgb(219,66,15)" rx="2" ry="2" />
+<text  x="217.31" y="1967.5" ></text>
+</g>
+<g >
+<title>btgettuple (59,861,424 samples, 0.02%)</title><rect x="269.1" y="2021" width="0.2" height="15.0" fill="rgb(235,138,33)" rx="2" ry="2" />
+<text  x="272.06" y="2031.5" ></text>
+</g>
+<g >
+<title>&lt;F as nom::internal::Parser&lt;I&gt;&gt;::process (1,042,261,025 samples, 0.35%)</title><rect x="42.1" y="2053" width="4.1" height="15.0" fill="rgb(222,80,19)" rx="2" ry="2" />
+<text  x="45.05" y="2063.5" ></text>
+</g>
+<g >
+<title>pgstat_initstats (55,532,395 samples, 0.02%)</title><rect x="1110.2" y="2053" width="0.2" height="15.0" fill="rgb(215,46,11)" rx="2" ry="2" />
+<text  x="1113.19" y="2063.5" ></text>
+</g>
+<g >
+<title>CreateTupleDescCopyConstr (105,963,932 samples, 0.04%)</title><rect x="63.6" y="2053" width="0.4" height="15.0" fill="rgb(223,83,19)" rx="2" ry="2" />
+<text  x="66.55" y="2063.5" ></text>
+</g>
+<g >
+<title>&lt;pgrx::iter::TableIterator&lt;Row&gt; as pgrx::callconv::RetAbi&gt;::box_ret_in_fcinfo (496,543,201 samples, 0.17%)</title><rect x="115.6" y="2037" width="1.9" height="15.0" fill="rgb(222,81,19)" rx="2" ry="2" />
+<text  x="118.58" y="2047.5" ></text>
+</g>
+<g >
+<title>ReadBuffer_common (289,877,014 samples, 0.10%)</title><rect x="183.9" y="2037" width="1.1" height="15.0" fill="rgb(213,40,9)" rx="2" ry="2" />
+<text  x="186.88" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (27,404,552 samples, 0.01%)</title><rect x="137.7" y="1925" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="140.69" y="1935.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1557" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1567.5" ></text>
+</g>
+<g >
+<title>tts_minimal_clear (66,485,913 samples, 0.02%)</title><rect x="545.3" y="2037" width="0.3" height="15.0" fill="rgb(242,171,40)" rx="2" ry="2" />
+<text  x="548.31" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (13,710,592,386 samples, 4.60%)</title><rect x="321.4" y="1845" width="54.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="324.39" y="1855.5" >[[ker..</text>
+</g>
+<g >
+<title>rsonpath::engine::tail_skipping::TailSkip&lt;I,&lt;V as rsonpath::classification::simd::Simd&gt;::QuotesClassifier&lt;I&gt;,&lt;V as rsonpath::classification::simd::Simd&gt;::StructuralClassifier&lt;I&gt;,V,64_usize&gt;::skip::avx2_pclmulqdq_popcnt (36,478,110 samples, 0.01%)</title><rect x="1171.5" y="2053" width="0.2" height="15.0" fill="rgb(222,79,18)" rx="2" ry="2" />
+<text  x="1174.53" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,584,567,007 samples, 0.53%)</title><rect x="245.6" y="1909" width="6.3" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1919.5" ></text>
+</g>
+<g >
+<title>pgrx_pg_sys::submodules::thread_check::check_active_thread (31,582,814 samples, 0.01%)</title><rect x="229.2" y="2021" width="0.1" height="15.0" fill="rgb(229,113,27)" rx="2" ry="2" />
+<text  x="232.20" y="2031.5" ></text>
+</g>
+<g >
+<title>nvme_map_data (2,507,254,007 samples, 0.84%)</title><rect x="365.2" y="1701" width="9.9" height="15.0" fill="rgb(253,225,53)" rx="2" ry="2" />
+<text  x="368.20" y="1711.5" ></text>
+</g>
+<g >
+<title>&lt;pgrx::iter::TableIterator&lt;Row&gt; as pgrx::callconv::RetAbi&gt;::box_ret_in_fcinfo (405,934,146 samples, 0.14%)</title><rect x="188.8" y="2021" width="1.7" height="15.0" fill="rgb(222,81,19)" rx="2" ry="2" />
+<text  x="191.85" y="2031.5" ></text>
+</g>
+<g >
+<title>_int_malloc (2,012,461,130 samples, 0.68%)</title><rect x="642.8" y="2053" width="8.0" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="645.83" y="2063.5" ></text>
+</g>
+<g >
+<title>tts_buffer_heap_clear (29,713,787 samples, 0.01%)</title><rect x="1182.1" y="2053" width="0.1" height="15.0" fill="rgb(208,14,3)" rx="2" ry="2" />
+<text  x="1185.12" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,549,020,515 samples, 0.52%)</title><rect x="245.6" y="325" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="335.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,561,822,319 samples, 0.52%)</title><rect x="245.6" y="1845" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1855.5" ></text>
+</g>
+<g >
+<title>LockBuffer (34,285,121 samples, 0.01%)</title><rect x="94.7" y="2053" width="0.2" height="15.0" fill="rgb(235,142,34)" rx="2" ry="2" />
+<text  x="97.74" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (3,573,283,039 samples, 1.20%)</title><rect x="350.4" y="1717" width="14.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="353.42" y="1727.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::quotes::shared::mask_64::BlockClassifier64Bit::classify (1,498,437,346 samples, 0.50%)</title><rect x="474.8" y="2037" width="5.9" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="477.81" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,553,744,546 samples, 0.52%)</title><rect x="245.6" y="1605" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1615.5" ></text>
+</g>
+<g >
+<title>&lt;core::hash::sip::Hasher&lt;S&gt; as core::hash::Hasher&gt;::write (409,668,368 samples, 0.14%)</title><rect x="110.1" y="2037" width="1.6" height="15.0" fill="rgb(234,135,32)" rx="2" ry="2" />
+<text  x="113.07" y="2047.5" ></text>
+</g>
+<g >
+<title>heap_fetch_toast_slice (288,884,598 samples, 0.10%)</title><rect x="688.9" y="2053" width="1.1" height="15.0" fill="rgb(229,114,27)" rx="2" ry="2" />
+<text  x="691.87" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="517" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="527.5" ></text>
+</g>
+<g >
+<title>_int_free (2,628,894,487 samples, 0.88%)</title><rect x="404.1" y="2037" width="10.4" height="15.0" fill="rgb(247,196,46)" rx="2" ry="2" />
+<text  x="407.07" y="2047.5" ></text>
+</g>
+<g >
+<title>_int_malloc (59,053,995 samples, 0.02%)</title><rect x="252.0" y="1941" width="0.2" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="255.01" y="1951.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (32,157,870 samples, 0.01%)</title><rect x="364.4" y="1573" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="367.39" y="1583.5" ></text>
+</g>
+<g >
+<title>[unknown] (4,833,844,499 samples, 1.62%)</title><rect x="243.8" y="2021" width="19.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="246.76" y="2031.5" ></text>
+</g>
+<g >
+<title>ExecReScan (77,108,280 samples, 0.03%)</title><rect x="71.0" y="2053" width="0.3" height="15.0" fill="rgb(205,2,0)" rx="2" ry="2" />
+<text  x="73.99" y="2063.5" ></text>
+</g>
+<g >
+<title>rsonpath::automaton::minimizer::minimize (4,146,351,895 samples, 1.39%)</title><rect x="1117.1" y="2053" width="16.4" height="15.0" fill="rgb(205,3,0)" rx="2" ry="2" />
+<text  x="1120.08" y="2063.5" ></text>
+</g>
+<g >
+<title>rsonpath_postgres_ext::run_qeury (110,589,939 samples, 0.04%)</title><rect x="229.3" y="2021" width="0.5" height="15.0" fill="rgb(228,109,26)" rx="2" ry="2" />
+<text  x="232.32" y="2031.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (87,249,789 samples, 0.03%)</title><rect x="1100.4" y="1861" width="0.4" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1103.40" y="1871.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (55,098,588 samples, 0.02%)</title><rect x="715.8" y="1973" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="718.81" y="1983.5" ></text>
+</g>
+<g >
+<title>nvme_pci_complete_batch (258,036,144 samples, 0.09%)</title><rect x="1100.2" y="1925" width="1.0" height="15.0" fill="rgb(245,185,44)" rx="2" ry="2" />
+<text  x="1103.16" y="1935.5" ></text>
+</g>
+<g >
+<title>AllocSetReset (174,192,104 samples, 0.06%)</title><rect x="239.6" y="2021" width="0.7" height="15.0" fill="rgb(226,100,24)" rx="2" ry="2" />
+<text  x="242.62" y="2031.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (53,850,973 samples, 0.02%)</title><rect x="1158.7" y="2037" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1161.73" y="2047.5" ></text>
+</g>
+<g >
+<title>pg_detoast_datum (83,763,497 samples, 0.03%)</title><rect x="462.8" y="2037" width="0.3" height="15.0" fill="rgb(231,122,29)" rx="2" ry="2" />
+<text  x="465.79" y="2047.5" ></text>
+</g>
+<g >
+<title>rsonpath::engine::main::Executor&lt;I,R,V&gt;::record_match_detected_at (182,065,545 samples, 0.06%)</title><rect x="1138.1" y="2053" width="0.7" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="1141.09" y="2063.5" ></text>
+</g>
+<g >
+<title>std::env::_var_os (1,148,143,392 samples, 0.39%)</title><rect x="211.3" y="1973" width="4.5" height="15.0" fill="rgb(238,155,37)" rx="2" ry="2" />
+<text  x="214.28" y="1983.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (53,387,787 samples, 0.02%)</title><rect x="1133.3" y="1973" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1136.30" y="1983.5" ></text>
+</g>
+<g >
+<title>fill_val (53,981,743 samples, 0.02%)</title><rect x="273.2" y="2021" width="0.2" height="15.0" fill="rgb(230,118,28)" rx="2" ry="2" />
+<text  x="276.18" y="2031.5" ></text>
+</g>
+<g >
+<title>tuplestore_puttuple_common (102,697,666 samples, 0.03%)</title><rect x="547.7" y="2037" width="0.4" height="15.0" fill="rgb(209,19,4)" rx="2" ry="2" />
+<text  x="550.73" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1125" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1135.5" ></text>
+</g>
+<g >
+<title>IsCatalogRelation (102,697,170 samples, 0.03%)</title><rect x="80.1" y="2053" width="0.4" height="15.0" fill="rgb(221,77,18)" rx="2" ry="2" />
+<text  x="83.10" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="933" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="943.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="725" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="735.5" ></text>
+</g>
+<g >
+<title>&lt;rsonpath::input::borrowed::BorrowedBytesBlockIterator&lt;rsonpath::input::padding::TwoSidesPaddedInput,R,_&gt; as rsonpath::input::InputBlockIterator&lt;_&gt;&gt;::next::cold_path (308,611,549 samples, 0.10%)</title><rect x="117.5" y="2037" width="1.3" height="15.0" fill="rgb(218,63,15)" rx="2" ry="2" />
+<text  x="120.55" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (56,808,730 samples, 0.02%)</title><rect x="137.7" y="1957" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="140.66" y="1967.5" ></text>
+</g>
+<g >
+<title>__memmove_avx_unaligned_erms (18,640,071,130 samples, 6.26%)</title><rect x="555.2" y="2053" width="73.9" height="15.0" fill="rgb(205,0,0)" rx="2" ry="2" />
+<text  x="558.23" y="2063.5" >__memmov..</text>
+</g>
+<g >
+<title>vector_map::VecMap&lt;K,V&gt;::insert (317,355,268 samples, 0.11%)</title><rect x="1188.7" y="2053" width="1.3" height="15.0" fill="rgb(212,34,8)" rx="2" ry="2" />
+<text  x="1191.74" y="2063.5" ></text>
+</g>
+<g >
+<title>alloc::raw_vec::RawVecInner&lt;A&gt;::reserve::do_reserve_and_handle (199,420,606 samples, 0.07%)</title><rect x="657.8" y="2053" width="0.8" height="15.0" fill="rgb(212,35,8)" rx="2" ry="2" />
+<text  x="660.80" y="2063.5" ></text>
+</g>
+<g >
+<title>nvme_unmap_data (106,722,741 samples, 0.04%)</title><rect x="1100.8" y="1909" width="0.4" height="15.0" fill="rgb(237,149,35)" rx="2" ry="2" />
+<text  x="1103.76" y="1919.5" ></text>
+</g>
+<g >
+<title>getenv (1,948,644,055 samples, 0.65%)</title><rect x="669.1" y="2053" width="7.7" height="15.0" fill="rgb(221,73,17)" rx="2" ry="2" />
+<text  x="672.10" y="2063.5" ></text>
+</g>
+<g >
+<title>MemoryContextDelete (244,206,958 samples, 0.08%)</title><rect x="178.6" y="2037" width="1.0" height="15.0" fill="rgb(244,179,42)" rx="2" ry="2" />
+<text  x="181.61" y="2047.5" ></text>
+</g>
+<g >
+<title>hash_bytes_uint32 (194,027,282 samples, 0.07%)</title><rect x="678.4" y="2053" width="0.8" height="15.0" fill="rgb(217,55,13)" rx="2" ry="2" />
+<text  x="681.39" y="2063.5" ></text>
+</g>
+<g >
+<title>ExecScanFetch (121,588,763 samples, 0.04%)</title><rect x="169.8" y="2037" width="0.4" height="15.0" fill="rgb(222,80,19)" rx="2" ry="2" />
+<text  x="172.76" y="2047.5" ></text>
+</g>
+<g >
+<title>rsonpath_syntax::parser::child_segment (1,085,155,754 samples, 0.36%)</title><rect x="536.1" y="2037" width="4.3" height="15.0" fill="rgb(244,180,43)" rx="2" ry="2" />
+<text  x="539.12" y="2047.5" ></text>
+</g>
+<g >
+<title>DataChecksumsEnabled (79,306,090 samples, 0.03%)</title><rect x="64.0" y="2053" width="0.3" height="15.0" fill="rgb(226,96,23)" rx="2" ry="2" />
+<text  x="66.97" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,561,822,319 samples, 0.52%)</title><rect x="245.6" y="1781" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1791.5" ></text>
+</g>
+<g >
+<title>hash_bytes (335,276,623 samples, 0.11%)</title><rect x="439.0" y="2037" width="1.3" height="15.0" fill="rgb(227,102,24)" rx="2" ry="2" />
+<text  x="441.98" y="2047.5" ></text>
+</g>
+<g >
+<title>SearchCatCacheInternal (354,621,901 samples, 0.12%)</title><rect x="230.9" y="2037" width="1.4" height="15.0" fill="rgb(213,38,9)" rx="2" ry="2" />
+<text  x="233.88" y="2047.5" ></text>
+</g>
+<g >
+<title>rsonpath::automaton::Automaton::minimize (35,264,886 samples, 0.01%)</title><rect x="207.3" y="2005" width="0.1" height="15.0" fill="rgb(236,145,34)" rx="2" ry="2" />
+<text  x="210.27" y="2015.5" ></text>
+</g>
+<g >
+<title>cee_scape::asm_based::call_with_sigsetjmp::call_from_c_to_rust (103,371,058 samples, 0.03%)</title><rect x="662.2" y="2053" width="0.5" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="665.24" y="2063.5" ></text>
+</g>
+<g >
+<title>ReservePrivateRefCountEntry (43,320,633 samples, 0.01%)</title><rect x="103.7" y="2053" width="0.1" height="15.0" fill="rgb(232,125,30)" rx="2" ry="2" />
+<text  x="106.67" y="2063.5" ></text>
+</g>
+<g >
+<title>rsonpath_syntax::parser::descendant_segment (431,862,210 samples, 0.14%)</title><rect x="1174.2" y="2053" width="1.7" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="1177.21" y="2063.5" ></text>
+</g>
+<g >
+<title>UnpinBuffer.constprop.0 (245,048,550 samples, 0.08%)</title><rect x="108.1" y="2053" width="1.0" height="15.0" fill="rgb(238,153,36)" rx="2" ry="2" />
+<text  x="111.11" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="581" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="591.5" ></text>
+</g>
+<g >
+<title>nvme_queue_rqs (2,731,964,693 samples, 0.92%)</title><rect x="364.6" y="1733" width="10.9" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="367.63" y="1743.5" ></text>
+</g>
+<g >
+<title>realloc (292,723,338 samples, 0.10%)</title><rect x="470.2" y="2037" width="1.1" height="15.0" fill="rgb(246,189,45)" rx="2" ry="2" />
+<text  x="473.17" y="2047.5" ></text>
+</g>
+<g >
+<title>&lt;rsonpath::input::padding::TwoSidesPaddedInput as rsonpath::input::SliceSeekable&gt;::seek_non_whitespace_forward (138,583,076 samples, 0.05%)</title><rect x="53.8" y="2053" width="0.6" height="15.0" fill="rgb(219,66,15)" rx="2" ry="2" />
+<text  x="56.81" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (930,160,632 samples, 0.31%)</title><rect x="1097.6" y="1973" width="3.7" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1100.63" y="1983.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (14,046,820,346 samples, 4.72%)</title><rect x="320.1" y="1861" width="55.6" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="323.06" y="1871.5" >[[ker..</text>
+</g>
+<g >
+<title>rsonpath::automaton::nfa::NondeterministicAutomaton::new (27,484,748 samples, 0.01%)</title><rect x="1133.5" y="2053" width="0.1" height="15.0" fill="rgb(254,226,54)" rx="2" ry="2" />
+<text  x="1136.51" y="2063.5" ></text>
+</g>
+<g >
+<title>heap_fetch_toast_slice (80,043,926 samples, 0.03%)</title><rect x="442.6" y="2037" width="0.3" height="15.0" fill="rgb(229,114,27)" rx="2" ry="2" />
+<text  x="445.59" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="405" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="415.5" ></text>
+</g>
+<g >
+<title>rsonpath::engine::tail_skipping::TailSkip&lt;I,&lt;V as rsonpath::classification::simd::Simd&gt;::QuotesClassifier&lt;I&gt;,&lt;V as rsonpath::classification::simd::Simd&gt;::StructuralClassifier&lt;I&gt;,V,64_usize&gt;::skip::avx2_pclmulqdq_popcnt (2,526,892,726 samples, 0.85%)</title><rect x="1161.5" y="2037" width="10.0" height="15.0" fill="rgb(222,79,18)" rx="2" ry="2" />
+<text  x="1164.51" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="773" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="783.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="885" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="895.5" ></text>
+</g>
+<g >
+<title>alloc::raw_vec::RawVecInner&lt;A&gt;::finish_grow (188,937,558 samples, 0.06%)</title><rect x="415.7" y="2037" width="0.7" height="15.0" fill="rgb(233,129,30)" rx="2" ry="2" />
+<text  x="418.70" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (64,201,840 samples, 0.02%)</title><rect x="533.9" y="2005" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="536.91" y="2015.5" ></text>
+</g>
+<g >
+<title>index_beginscan_internal (68,245,417 samples, 0.02%)</title><rect x="696.0" y="2053" width="0.3" height="15.0" fill="rgb(252,217,52)" rx="2" ry="2" />
+<text  x="699.02" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="469" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="479.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1269" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1279.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (30,871,355 samples, 0.01%)</title><rect x="534.0" y="1893" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="536.98" y="1903.5" ></text>
+</g>
+<g >
+<title>equalTupleDescs (300,426,553 samples, 0.10%)</title><rect x="272.0" y="2021" width="1.2" height="15.0" fill="rgb(211,32,7)" rx="2" ry="2" />
+<text  x="274.99" y="2031.5" ></text>
+</g>
+<g >
+<title>RelationGetIndexList (34,458,510 samples, 0.01%)</title><rect x="185.6" y="2037" width="0.1" height="15.0" fill="rgb(224,88,21)" rx="2" ry="2" />
+<text  x="188.55" y="2047.5" ></text>
+</g>
+<g >
+<title>build_function_result_tupdesc_t (114,472,573 samples, 0.04%)</title><rect x="420.9" y="2037" width="0.4" height="15.0" fill="rgb(234,135,32)" rx="2" ry="2" />
+<text  x="423.89" y="2047.5" ></text>
+</g>
+<g >
+<title>hashbrown::raw::RawTableInner::fallible_with_capacity (77,995,513 samples, 0.03%)</title><rect x="688.4" y="2053" width="0.3" height="15.0" fill="rgb(242,173,41)" rx="2" ry="2" />
+<text  x="691.37" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (39,433,216 samples, 0.01%)</title><rect x="364.4" y="1589" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="367.36" y="1599.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1013" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1023.5" ></text>
+</g>
+<g >
+<title>__sigsetjmp (131,510,426 samples, 0.04%)</title><rect x="629.4" y="2053" width="0.6" height="15.0" fill="rgb(242,172,41)" rx="2" ry="2" />
+<text  x="632.44" y="2063.5" ></text>
+</g>
+<g >
+<title>pgrx_pg_sys::submodules::panic::run_guarded (9,275,198,435 samples, 3.11%)</title><rect x="192.5" y="2021" width="36.7" height="15.0" fill="rgb(209,22,5)" rx="2" ry="2" />
+<text  x="195.45" y="2031.5" >pgr..</text>
+</g>
+<g >
+<title>&lt;rsonpath::result::nodes::NodesRecorder&lt;B,S&gt; as rsonpath::result::Recorder&lt;B&gt;&gt;::record_value_terminator (929,591,727 samples, 0.31%)</title><rect x="55.7" y="2053" width="3.7" height="15.0" fill="rgb(209,20,4)" rx="2" ry="2" />
+<text  x="58.75" y="2063.5" ></text>
+</g>
+<g >
+<title>AllocSetReset (878,767,866 samples, 0.30%)</title><rect x="141.6" y="2037" width="3.5" height="15.0" fill="rgb(226,100,24)" rx="2" ry="2" />
+<text  x="144.64" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1381" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1391.5" ></text>
+</g>
+<g >
+<title>int4hashfast (324,701,944 samples, 0.11%)</title><rect x="446.7" y="2037" width="1.3" height="15.0" fill="rgb(248,200,47)" rx="2" ry="2" />
+<text  x="449.69" y="2047.5" ></text>
+</g>
+<g >
+<title>rsonpath_ext_str_wrapper (167,047,567 samples, 0.06%)</title><rect x="1171.7" y="2053" width="0.6" height="15.0" fill="rgb(220,73,17)" rx="2" ry="2" />
+<text  x="1174.67" y="2063.5" ></text>
+</g>
+<g >
+<title>&lt;F as nom::internal::Parser&lt;I&gt;&gt;::process (109,746,008 samples, 0.04%)</title><rect x="109.1" y="2037" width="0.4" height="15.0" fill="rgb(222,80,19)" rx="2" ry="2" />
+<text  x="112.09" y="2047.5" ></text>
+</g>
+<g >
+<title>ResourceOwnerForgetBuffer (37,800,985 samples, 0.01%)</title><rect x="243.2" y="2021" width="0.2" height="15.0" fill="rgb(247,193,46)" rx="2" ry="2" />
+<text  x="246.23" y="2031.5" ></text>
+</g>
+<g >
+<title>slot_getsomeattrs_int (29,437,854 samples, 0.01%)</title><rect x="1180.7" y="2053" width="0.1" height="15.0" fill="rgb(252,219,52)" rx="2" ry="2" />
+<text  x="1183.70" y="2063.5" ></text>
+</g>
+<g >
+<title>AllocSetFree (597,305,821 samples, 0.20%)</title><rect x="139.2" y="2037" width="2.4" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="142.19" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (26,098,359 samples, 0.01%)</title><rect x="687.9" y="2005" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="690.86" y="2015.5" ></text>
+</g>
+<g >
+<title>json_out (212,847,895 samples, 0.07%)</title><rect x="450.8" y="2037" width="0.8" height="15.0" fill="rgb(222,79,19)" rx="2" ry="2" />
+<text  x="453.77" y="2047.5" ></text>
+</g>
+<g >
+<title>nvme_irq (25,612,406 samples, 0.01%)</title><rect x="375.6" y="1765" width="0.1" height="15.0" fill="rgb(225,95,22)" rx="2" ry="2" />
+<text  x="378.57" y="1775.5" ></text>
+</g>
+<g >
+<title>ResourceOwnerForgetCatCacheRef (54,522,069 samples, 0.02%)</title><rect x="243.4" y="2021" width="0.2" height="15.0" fill="rgb(212,36,8)" rx="2" ry="2" />
+<text  x="246.38" y="2031.5" ></text>
+</g>
+<g >
+<title>exprType (160,896,535 samples, 0.05%)</title><rect x="436.2" y="2037" width="0.6" height="15.0" fill="rgb(225,95,22)" rx="2" ry="2" />
+<text  x="439.17" y="2047.5" ></text>
+</g>
+<g >
+<title>_bt_first (124,997,496 samples, 0.04%)</title><rect x="401.3" y="2037" width="0.5" height="15.0" fill="rgb(237,151,36)" rx="2" ry="2" />
+<text  x="404.29" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,535,628,930 samples, 0.52%)</title><rect x="245.6" y="69" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.63" y="79.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (25,361,696 samples, 0.01%)</title><rect x="414.4" y="1957" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="417.39" y="1967.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (58,993,197 samples, 0.02%)</title><rect x="137.7" y="2005" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="140.66" y="2015.5" ></text>
+</g>
+<g >
+<title>FastPathUnGrantRelationLock (298,729,675 samples, 0.10%)</title><rect x="72.9" y="2053" width="1.2" height="15.0" fill="rgb(236,143,34)" rx="2" ry="2" />
+<text  x="75.94" y="2063.5" ></text>
+</g>
+<g >
+<title>nvme_irq (66,057,158 samples, 0.02%)</title><rect x="628.8" y="1941" width="0.3" height="15.0" fill="rgb(225,95,22)" rx="2" ry="2" />
+<text  x="631.81" y="1951.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (44,653,742 samples, 0.01%)</title><rect x="500.9" y="2005" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="503.91" y="2015.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (458,446,889 samples, 0.15%)</title><rect x="1098.3" y="1925" width="1.8" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1101.32" y="1935.5" ></text>
+</g>
+<g >
+<title>ss_report_location (29,737,634 samples, 0.01%)</title><rect x="284.2" y="2021" width="0.1" height="15.0" fill="rgb(249,202,48)" rx="2" ry="2" />
+<text  x="287.19" y="2031.5" ></text>
+</g>
+<g >
+<title>MemoryContextRegisterResetCallback (53,257,016 samples, 0.02%)</title><rect x="245.3" y="2005" width="0.2" height="15.0" fill="rgb(208,17,4)" rx="2" ry="2" />
+<text  x="248.25" y="2015.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,566,665,409 samples, 0.53%)</title><rect x="245.6" y="1893" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1903.5" ></text>
+</g>
+<g >
+<title>fmgr_info_cxt_security (149,030,164 samples, 0.05%)</title><rect x="668.0" y="2053" width="0.6" height="15.0" fill="rgb(242,171,41)" rx="2" ry="2" />
+<text  x="671.04" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (30,793,452 samples, 0.01%)</title><rect x="628.7" y="1861" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="631.69" y="1871.5" ></text>
+</g>
+<g >
+<title>memcpy@plt (42,510,182 samples, 0.01%)</title><rect x="454.2" y="2037" width="0.2" height="15.0" fill="rgb(224,88,21)" rx="2" ry="2" />
+<text  x="457.23" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (1,559,412,378 samples, 0.52%)</title><rect x="368.7" y="1589" width="6.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="371.69" y="1599.5" ></text>
+</g>
+<g >
+<title>index_close (41,665,184 samples, 0.01%)</title><rect x="696.3" y="2053" width="0.2" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="699.29" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (57,331,201 samples, 0.02%)</title><rect x="137.7" y="1973" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="140.66" y="1983.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,547,946,022 samples, 0.52%)</title><rect x="245.6" y="293" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.59" y="303.5" ></text>
+</g>
+<g >
+<title>SearchSysCache1 (123,697,504 samples, 0.04%)</title><rect x="232.3" y="2037" width="0.5" height="15.0" fill="rgb(250,207,49)" rx="2" ry="2" />
+<text  x="235.29" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1077" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1087.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (22,187,382,657 samples, 7.45%)</title><rect x="287.8" y="2005" width="87.9" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="290.84" y="2015.5" >[[kernel.k..</text>
+</g>
+<g >
+<title>heapgettup_pagemode (108,836,879 samples, 0.04%)</title><rect x="445.8" y="2037" width="0.4" height="15.0" fill="rgb(242,170,40)" rx="2" ry="2" />
+<text  x="448.79" y="2047.5" ></text>
+</g>
+<g >
+<title>heapam_index_fetch_begin (27,992,604 samples, 0.01%)</title><rect x="444.6" y="2037" width="0.1" height="15.0" fill="rgb(243,174,41)" rx="2" ry="2" />
+<text  x="447.60" y="2047.5" ></text>
+</g>
+<g >
+<title>IsBinaryCoercible (107,689,875 samples, 0.04%)</title><rect x="79.7" y="2053" width="0.4" height="15.0" fill="rgb(249,204,48)" rx="2" ry="2" />
+<text  x="82.67" y="2063.5" ></text>
+</g>
+<g >
+<title>ExecMakeTableFunctionResult (1,061,678,993 samples, 0.36%)</title><rect x="156.4" y="2037" width="4.2" height="15.0" fill="rgb(239,157,37)" rx="2" ry="2" />
+<text  x="159.43" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (57,264,088 samples, 0.02%)</title><rect x="715.8" y="2021" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="718.80" y="2031.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (438,468,907 samples, 0.15%)</title><rect x="1098.4" y="1909" width="1.7" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1101.40" y="1919.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (1,007,300,982 samples, 0.34%)</title><rect x="1097.3" y="2021" width="4.0" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1100.32" y="2031.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (25,846,354 samples, 0.01%)</title><rect x="385.3" y="2005" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="388.29" y="2015.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::structural::shared::vector_256::BlockClassifier256::new (107,772,702 samples, 0.04%)</title><rect x="216.6" y="2005" width="0.4" height="15.0" fill="rgb(236,146,34)" rx="2" ry="2" />
+<text  x="219.61" y="2015.5" ></text>
+</g>
+<g >
+<title>pgrx::memcxt::PgMemoryContexts::value (388,067,516 samples, 0.13%)</title><rect x="254.7" y="1989" width="1.6" height="15.0" fill="rgb(244,181,43)" rx="2" ry="2" />
+<text  x="257.73" y="1999.5" ></text>
+</g>
+<g >
+<title>malloc_consolidate (1,799,969,914 samples, 0.60%)</title><rect x="716.0" y="2053" width="7.2" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="719.03" y="2063.5" ></text>
+</g>
+<g >
+<title>PinBuffer (329,250,229 samples, 0.11%)</title><rect x="181.6" y="2037" width="1.3" height="15.0" fill="rgb(219,64,15)" rx="2" ry="2" />
+<text  x="184.59" y="2047.5" ></text>
+</g>
+<g >
+<title>rsonpath::automaton::minimizer::Minimizer::activate_if_new (30,827,238 samples, 0.01%)</title><rect x="207.4" y="2005" width="0.1" height="15.0" fill="rgb(245,188,45)" rx="2" ry="2" />
+<text  x="210.40" y="2015.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (134,388,843 samples, 0.05%)</title><rect x="1099.6" y="1861" width="0.5" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1102.61" y="1871.5" ></text>
+</g>
+<g >
+<title>ResourceOwnerRememberRelationRef (44,505,570 samples, 0.01%)</title><rect x="105.1" y="2053" width="0.2" height="15.0" fill="rgb(241,166,39)" rx="2" ry="2" />
+<text  x="108.12" y="2063.5" ></text>
+</g>
+<g >
+<title>ExecFunctionScan (41,242,749 samples, 0.01%)</title><rect x="150.2" y="2037" width="0.2" height="15.0" fill="rgb(224,89,21)" rx="2" ry="2" />
+<text  x="153.24" y="2047.5" ></text>
+</g>
+<g >
+<title>heapam_slot_callbacks (114,759,447 samples, 0.04%)</title><rect x="694.7" y="2053" width="0.4" height="15.0" fill="rgb(229,111,26)" rx="2" ry="2" />
+<text  x="697.66" y="2063.5" ></text>
+</g>
+<g >
+<title>int8inc (155,683,897 samples, 0.05%)</title><rect x="448.0" y="2037" width="0.6" height="15.0" fill="rgb(235,138,33)" rx="2" ry="2" />
+<text  x="450.97" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (97,315,601 samples, 0.03%)</title><rect x="364.1" y="1621" width="0.4" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="367.14" y="1631.5" ></text>
+</g>
+<g >
+<title>__tls_get_addr (49,337,808 samples, 0.02%)</title><rect x="191.5" y="2021" width="0.2" height="15.0" fill="rgb(246,191,45)" rx="2" ry="2" />
+<text  x="194.51" y="2031.5" ></text>
+</g>
+<g >
+<title>__sigsetjmp (73,394,741 samples, 0.02%)</title><rect x="253.6" y="1989" width="0.3" height="15.0" fill="rgb(242,172,41)" rx="2" ry="2" />
+<text  x="256.61" y="1999.5" ></text>
+</g>
+<g >
+<title>ExecScanFetch (40,624,961 samples, 0.01%)</title><rect x="72.2" y="2053" width="0.2" height="15.0" fill="rgb(222,80,19)" rx="2" ry="2" />
+<text  x="75.21" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,545,352,286 samples, 0.52%)</title><rect x="245.6" y="245" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.59" y="255.5" ></text>
+</g>
+<g >
+<title>ResourceOwnerRememberBuffer (58,062,594 samples, 0.02%)</title><rect x="104.4" y="2053" width="0.2" height="15.0" fill="rgb(205,0,0)" rx="2" ry="2" />
+<text  x="107.38" y="2063.5" ></text>
+</g>
+<g >
+<title>equalTupleDescs (205,406,533 samples, 0.07%)</title><rect x="435.4" y="2037" width="0.8" height="15.0" fill="rgb(211,32,7)" rx="2" ry="2" />
+<text  x="438.36" y="2047.5" ></text>
+</g>
+<g >
+<title>__tls_get_addr (477,356,588 samples, 0.16%)</title><rect x="631.6" y="2053" width="1.9" height="15.0" fill="rgb(246,191,45)" rx="2" ry="2" />
+<text  x="634.58" y="2063.5" ></text>
+</g>
+<g >
+<title>tuplestore_gettupleslot (162,628,291 samples, 0.05%)</title><rect x="1186.6" y="2053" width="0.7" height="15.0" fill="rgb(220,69,16)" rx="2" ry="2" />
+<text  x="1189.61" y="2063.5" ></text>
+</g>
+<g >
+<title>ReleaseBuffer (49,393,837 samples, 0.02%)</title><rect x="103.4" y="2053" width="0.2" height="15.0" fill="rgb(220,71,17)" rx="2" ry="2" />
+<text  x="106.42" y="2063.5" ></text>
+</g>
+<g >
+<title>nvme_setup_rw (42,073,401 samples, 0.01%)</title><rect x="375.2" y="1701" width="0.2" height="15.0" fill="rgb(227,103,24)" rx="2" ry="2" />
+<text  x="378.24" y="1711.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="757" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="767.5" ></text>
+</g>
+<g >
+<title>rsonpath::engine::main::Executor&lt;I,R,V&gt;::run_on_subtree::avx2_pclmulqdq_popcnt (68,932,948 samples, 0.02%)</title><rect x="217.0" y="2005" width="0.3" height="15.0" fill="rgb(231,123,29)" rx="2" ry="2" />
+<text  x="220.04" y="2015.5" ></text>
+</g>
+<g >
+<title>rsonpath::automaton::minimizer::minimize (241,833,285 samples, 0.08%)</title><rect x="283.2" y="2021" width="1.0" height="15.0" fill="rgb(205,3,0)" rx="2" ry="2" />
+<text  x="286.23" y="2031.5" ></text>
+</g>
+<g >
+<title>__sigjmp_save (40,641,486 samples, 0.01%)</title><rect x="629.3" y="2053" width="0.1" height="15.0" fill="rgb(239,157,37)" rx="2" ry="2" />
+<text  x="632.28" y="2063.5" ></text>
+</g>
+<g >
+<title>alloc::raw_vec::RawVec&lt;T,A&gt;::grow_one (40,906,322 samples, 0.01%)</title><rect x="268.5" y="2021" width="0.1" height="15.0" fill="rgb(248,200,47)" rx="2" ry="2" />
+<text  x="271.48" y="2031.5" ></text>
+</g>
+<g >
+<title>ReservePrivateRefCountEntry (39,009,219 samples, 0.01%)</title><rect x="229.8" y="2037" width="0.1" height="15.0" fill="rgb(232,125,30)" rx="2" ry="2" />
+<text  x="232.76" y="2047.5" ></text>
+</g>
+<g >
+<title>ReceiveSharedInvalidMessages (26,952,067 samples, 0.01%)</title><rect x="101.6" y="2053" width="0.1" height="15.0" fill="rgb(211,27,6)" rx="2" ry="2" />
+<text  x="104.56" y="2063.5" ></text>
+</g>
+<g >
+<title>RelationGetIndexList (66,579,051 samples, 0.02%)</title><rect x="240.5" y="2021" width="0.3" height="15.0" fill="rgb(224,88,21)" rx="2" ry="2" />
+<text  x="243.51" y="2031.5" ></text>
+</g>
+<g >
+<title>malloc@plt (40,156,371 samples, 0.01%)</title><rect x="454.0" y="2037" width="0.1" height="15.0" fill="rgb(246,192,46)" rx="2" ry="2" />
+<text  x="456.95" y="2047.5" ></text>
+</g>
+<g >
+<title>realloc (91,596,620 samples, 0.03%)</title><rect x="1110.4" y="2053" width="0.4" height="15.0" fill="rgb(246,189,45)" rx="2" ry="2" />
+<text  x="1113.41" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,777,049,801 samples, 0.60%)</title><rect x="245.6" y="1973" width="7.0" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1983.5" ></text>
+</g>
+<g >
+<title>list_copy (85,403,136 samples, 0.03%)</title><rect x="282.5" y="2021" width="0.4" height="15.0" fill="rgb(219,68,16)" rx="2" ry="2" />
+<text  x="285.52" y="2031.5" ></text>
+</g>
+<g >
+<title>AllocSetDelete (328,311,850 samples, 0.11%)</title><rect x="137.9" y="2037" width="1.3" height="15.0" fill="rgb(210,23,5)" rx="2" ry="2" />
+<text  x="140.89" y="2047.5" ></text>
+</g>
+<g >
+<title>ResourceOwnerForgetBuffer (30,200,734 samples, 0.01%)</title><rect x="104.2" y="2053" width="0.1" height="15.0" fill="rgb(247,193,46)" rx="2" ry="2" />
+<text  x="107.20" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (51,276,643 samples, 0.02%)</title><rect x="1100.5" y="1845" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1103.55" y="1855.5" ></text>
+</g>
+<g >
+<title>cfree@GLIBC_2.2.5 (237,954,671 samples, 0.08%)</title><rect x="203.3" y="2005" width="0.9" height="15.0" fill="rgb(233,131,31)" rx="2" ry="2" />
+<text  x="206.31" y="2015.5" ></text>
+</g>
+<g >
+<title>cee_scape::asm_based::call_with_sigsetjmp (739,597,406 samples, 0.25%)</title><rect x="421.3" y="2037" width="3.0" height="15.0" fill="rgb(232,127,30)" rx="2" ry="2" />
+<text  x="424.35" y="2047.5" ></text>
+</g>
+<g >
+<title>toast_close_indexes (74,300,384 samples, 0.02%)</title><rect x="1181.7" y="2053" width="0.3" height="15.0" fill="rgb(243,177,42)" rx="2" ry="2" />
+<text  x="1184.69" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="965" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="975.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1093" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1103.5" ></text>
+</g>
+<g >
+<title>_int_malloc (37,199,671 samples, 0.01%)</title><rect x="251.9" y="1925" width="0.1" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="254.86" y="1935.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::quotes::shared::mask_64::BlockClassifier64Bit::classify (1,659,518,123 samples, 0.56%)</title><rect x="501.2" y="2021" width="6.6" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="504.22" y="2031.5" ></text>
+</g>
+<g >
+<title>__strcmp_avx2 (273,705,846 samples, 0.09%)</title><rect x="389.2" y="2037" width="1.1" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="392.24" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1461" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1471.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (124,787,823 samples, 0.04%)</title><rect x="1100.3" y="1893" width="0.5" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1103.26" y="1903.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,535,628,930 samples, 0.52%)</title><rect x="245.6" y="101" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.63" y="111.5" ></text>
+</g>
+<g >
+<title>hash_search_with_hash_value (308,985,487 samples, 0.10%)</title><rect x="259.6" y="2005" width="1.3" height="15.0" fill="rgb(249,205,49)" rx="2" ry="2" />
+<text  x="262.63" y="2015.5" ></text>
+</g>
+<g >
+<title>pgrx_pg_sys::submodules::panic::run_guarded (1,837,622,695 samples, 0.62%)</title><rect x="1101.3" y="2053" width="7.3" height="15.0" fill="rgb(209,22,5)" rx="2" ry="2" />
+<text  x="1104.31" y="2063.5" ></text>
+</g>
+<g >
+<title>AllocSetContextCreateInternal (227,517,315 samples, 0.08%)</title><rect x="60.3" y="2053" width="0.9" height="15.0" fill="rgb(211,30,7)" rx="2" ry="2" />
+<text  x="63.26" y="2063.5" ></text>
+</g>
+<g >
+<title>pglz_decompress (93,597,470,289 samples, 31.42%)</title><rect x="730.5" y="2053" width="370.8" height="15.0" fill="rgb(217,59,14)" rx="2" ry="2" />
+<text  x="733.51" y="2063.5" >pglz_decompress</text>
+</g>
+<g >
+<title>nvme_pci_setup_prps (65,461,874 samples, 0.02%)</title><rect x="374.9" y="1685" width="0.2" height="15.0" fill="rgb(251,213,51)" rx="2" ry="2" />
+<text  x="377.87" y="1695.5" ></text>
+</g>
+<g >
+<title>pfree (221,014,148 samples, 0.07%)</title><rect x="461.9" y="2037" width="0.9" height="15.0" fill="rgb(239,160,38)" rx="2" ry="2" />
+<text  x="464.91" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1349" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1359.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="693" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="703.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,538,312,826 samples, 0.52%)</title><rect x="245.6" y="181" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.62" y="191.5" ></text>
+</g>
+<g >
+<title>[unknown] (11,293,713,814 samples, 3.79%)</title><rect x="239.6" y="2037" width="44.8" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="242.62" y="2047.5" >[unk..</text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (1,043,650,064 samples, 0.35%)</title><rect x="1097.2" y="2037" width="4.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1100.18" y="2047.5" ></text>
+</g>
+<g >
+<title>TransactionIdLimitedForOldSnapshots (93,607,636 samples, 0.03%)</title><rect x="106.9" y="2053" width="0.4" height="15.0" fill="rgb(235,140,33)" rx="2" ry="2" />
+<text  x="109.89" y="2063.5" ></text>
+</g>
+<g >
+<title>relation_close (43,205,372 samples, 0.01%)</title><rect x="471.3" y="2037" width="0.2" height="15.0" fill="rgb(231,123,29)" rx="2" ry="2" />
+<text  x="474.33" y="2047.5" ></text>
+</g>
+<g >
+<title>&lt;core::iter::adapters::map::Map&lt;I,F&gt; as core::iter::traits::iterator::Iterator&gt;::next (487,198,216 samples, 0.16%)</title><rect x="46.2" y="2053" width="1.9" height="15.0" fill="rgb(217,55,13)" rx="2" ry="2" />
+<text  x="49.18" y="2063.5" ></text>
+</g>
+<g >
+<title>ExecDropSingleTupleTableSlot (38,879,486 samples, 0.01%)</title><rect x="64.4" y="2053" width="0.1" height="15.0" fill="rgb(219,65,15)" rx="2" ry="2" />
+<text  x="67.36" y="2063.5" ></text>
+</g>
+<g >
+<title>nvme_pci_complete_batch (57,471,618 samples, 0.02%)</title><rect x="628.8" y="1925" width="0.2" height="15.0" fill="rgb(245,185,44)" rx="2" ry="2" />
+<text  x="631.82" y="1935.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="917" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="927.5" ></text>
+</g>
+<g >
+<title>LockRelease (193,252,602 samples, 0.06%)</title><rect x="95.4" y="2053" width="0.8" height="15.0" fill="rgb(220,71,17)" rx="2" ry="2" />
+<text  x="98.44" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (61,001,705 samples, 0.02%)</title><rect x="715.8" y="2037" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="718.78" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (41,513,670 samples, 0.01%)</title><rect x="500.9" y="1957" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="503.92" y="1967.5" ></text>
+</g>
+<g >
+<title>_bt_preprocess_array_keys (80,951,610 samples, 0.03%)</title><rect x="403.1" y="2037" width="0.3" height="15.0" fill="rgb(233,130,31)" rx="2" ry="2" />
+<text  x="406.07" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (58,428,535 samples, 0.02%)</title><rect x="137.7" y="1989" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="140.66" y="1999.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="549" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="559.5" ></text>
+</g>
+<g >
+<title>rsonpath::automaton::minimizer::minimize (215,208,669 samples, 0.07%)</title><rect x="207.5" y="2005" width="0.9" height="15.0" fill="rgb(205,3,0)" rx="2" ry="2" />
+<text  x="210.53" y="2015.5" ></text>
+</g>
+<g >
+<title>IncrBufferRefCount (31,925,261 samples, 0.01%)</title><rect x="174.2" y="2037" width="0.1" height="15.0" fill="rgb(209,22,5)" rx="2" ry="2" />
+<text  x="177.21" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (203,041,542 samples, 0.07%)</title><rect x="363.7" y="1653" width="0.8" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="366.73" y="1663.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc11___rdl_alloc (161,792,041 samples, 0.05%)</title><rect x="549.4" y="2053" width="0.7" height="15.0" fill="rgb(224,90,21)" rx="2" ry="2" />
+<text  x="552.42" y="2063.5" ></text>
+</g>
+<g >
+<title>LockAcquireExtended (464,298,059 samples, 0.16%)</title><rect x="91.8" y="2053" width="1.8" height="15.0" fill="rgb(234,136,32)" rx="2" ry="2" />
+<text  x="94.75" y="2063.5" ></text>
+</g>
+<g >
+<title>_bt_preprocess_keys (101,831,803 samples, 0.03%)</title><rect x="265.9" y="2021" width="0.4" height="15.0" fill="rgb(254,228,54)" rx="2" ry="2" />
+<text  x="268.89" y="2031.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (19,493,408,770 samples, 6.54%)</title><rect x="298.5" y="1893" width="77.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="301.49" y="1903.5" >[[kernel..</text>
+</g>
+<g >
+<title>index_getnext_slot (36,363,363 samples, 0.01%)</title><rect x="281.8" y="2021" width="0.1" height="15.0" fill="rgb(211,32,7)" rx="2" ry="2" />
+<text  x="284.80" y="2031.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (21,690,817,655 samples, 7.28%)</title><rect x="289.8" y="1973" width="85.9" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="292.81" y="1983.5" >[[kernel.k..</text>
+</g>
+<g >
+<title>__sigsetjmp (53,909,371 samples, 0.02%)</title><rect x="257.2" y="2005" width="0.2" height="15.0" fill="rgb(242,172,41)" rx="2" ry="2" />
+<text  x="260.16" y="2015.5" ></text>
+</g>
+<g >
+<title>rsonpath::input::padding::PaddedBlock::pad_first_block (436,625,510 samples, 0.15%)</title><rect x="217.3" y="2005" width="1.7" height="15.0" fill="rgb(250,209,50)" rx="2" ry="2" />
+<text  x="220.31" y="2015.5" ></text>
+</g>
+<g >
+<title>ShutdownExprContext (373,992,476 samples, 0.13%)</title><rect x="233.2" y="2037" width="1.5" height="15.0" fill="rgb(240,162,38)" rx="2" ry="2" />
+<text  x="236.23" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1157" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1167.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,561,822,319 samples, 0.52%)</title><rect x="245.6" y="1621" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1631.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="853" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="863.5" ></text>
+</g>
+<g >
+<title>ExecReScanFunctionScan (405,625,464 samples, 0.14%)</title><rect x="167.6" y="2037" width="1.6" height="15.0" fill="rgb(229,111,26)" rx="2" ry="2" />
+<text  x="170.56" y="2047.5" ></text>
+</g>
+<g >
+<title>heap_compute_data_size (48,966,503 samples, 0.02%)</title><rect x="688.7" y="2053" width="0.2" height="15.0" fill="rgb(245,188,45)" rx="2" ry="2" />
+<text  x="691.68" y="2063.5" ></text>
+</g>
+<g >
+<title>heapgetpage (170,841,674 samples, 0.06%)</title><rect x="445.1" y="2037" width="0.7" height="15.0" fill="rgb(254,225,53)" rx="2" ry="2" />
+<text  x="448.12" y="2047.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::structural::StructuralImpl::resume (231,875,341 samples, 0.08%)</title><rect x="1169.4" y="2021" width="0.9" height="15.0" fill="rgb(237,149,35)" rx="2" ry="2" />
+<text  x="1172.43" y="2031.5" ></text>
+</g>
+<g >
+<title>minimal_tuple_from_heap_tuple (35,333,675 samples, 0.01%)</title><rect x="454.4" y="2037" width="0.2" height="15.0" fill="rgb(210,25,6)" rx="2" ry="2" />
+<text  x="457.44" y="2047.5" ></text>
+</g>
+<g >
+<title>&lt;&amp;str as pgrx::callconv::ArgAbi&gt;::unbox_arg_unchecked (349,796,634 samples, 0.12%)</title><rect x="186.3" y="2021" width="1.4" height="15.0" fill="rgb(219,65,15)" rx="2" ry="2" />
+<text  x="189.35" y="2031.5" ></text>
+</g>
+<g >
+<title>hash_search (36,163,799 samples, 0.01%)</title><rect x="679.2" y="2053" width="0.1" height="15.0" fill="rgb(216,55,13)" rx="2" ry="2" />
+<text  x="682.16" y="2063.5" ></text>
+</g>
+<g >
+<title>palloc0 (756,986,167 samples, 0.25%)</title><rect x="458.9" y="2037" width="3.0" height="15.0" fill="rgb(251,213,51)" rx="2" ry="2" />
+<text  x="461.87" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1045" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1055.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="805" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="815.5" ></text>
+</g>
+<g >
+<title>palloc (972,939,378 samples, 0.33%)</title><rect x="455.0" y="2037" width="3.9" height="15.0" fill="rgb(211,29,7)" rx="2" ry="2" />
+<text  x="458.01" y="2047.5" ></text>
+</g>
+<g >
+<title>IsSharedRelation (58,228,129 samples, 0.02%)</title><rect x="80.5" y="2053" width="0.2" height="15.0" fill="rgb(217,59,14)" rx="2" ry="2" />
+<text  x="83.50" y="2063.5" ></text>
+</g>
+<g >
+<title>ExecScan (212,751,960 samples, 0.07%)</title><rect x="71.4" y="2053" width="0.8" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="74.37" y="2063.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::simd::configure (1,915,509,175 samples, 0.64%)</title><rect x="208.7" y="2005" width="7.6" height="15.0" fill="rgb(215,46,11)" rx="2" ry="2" />
+<text  x="211.67" y="2015.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (891,036,236 samples, 0.30%)</title><rect x="1097.8" y="1957" width="3.5" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1100.78" y="1967.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (29,476,094 samples, 0.01%)</title><rect x="650.7" y="1973" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="653.68" y="1983.5" ></text>
+</g>
+<g >
+<title>tts_buffer_heap_init (117,432,379 samples, 0.04%)</title><rect x="544.8" y="2037" width="0.5" height="15.0" fill="rgb(244,181,43)" rx="2" ry="2" />
+<text  x="547.85" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (13,374,409,330 samples, 4.49%)</title><rect x="322.7" y="1829" width="53.0" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="325.72" y="1839.5" >[[ker..</text>
+</g>
+<g >
+<title>PredicateLockTID (29,695,771 samples, 0.01%)</title><rect x="99.9" y="2053" width="0.2" height="15.0" fill="rgb(223,84,20)" rx="2" ry="2" />
+<text  x="102.95" y="2063.5" ></text>
+</g>
+<g >
+<title>index_fetch_heap (177,583,379 samples, 0.06%)</title><rect x="281.1" y="2021" width="0.7" height="15.0" fill="rgb(227,102,24)" rx="2" ry="2" />
+<text  x="284.10" y="2031.5" ></text>
+</g>
+<g >
+<title>RelationClose (70,415,521 samples, 0.02%)</title><rect x="102.1" y="2053" width="0.3" height="15.0" fill="rgb(208,18,4)" rx="2" ry="2" />
+<text  x="105.11" y="2063.5" ></text>
+</g>
+<g >
+<title>deconstruct_array (155,750,722 samples, 0.05%)</title><rect x="430.0" y="2037" width="0.6" height="15.0" fill="rgb(253,221,53)" rx="2" ry="2" />
+<text  x="433.01" y="2047.5" ></text>
+</g>
+<g >
+<title>pgrx::memcxt::PgMemoryContexts::palloc (50,083,765 samples, 0.02%)</title><rect x="467.3" y="2037" width="0.2" height="15.0" fill="rgb(237,148,35)" rx="2" ry="2" />
+<text  x="470.27" y="2047.5" ></text>
+</g>
+<g >
+<title>namestrcpy (45,138,993 samples, 0.02%)</title><rect x="728.4" y="2053" width="0.2" height="15.0" fill="rgb(246,190,45)" rx="2" ry="2" />
+<text  x="731.39" y="2063.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::structural::shared::vector_256::BlockClassifier256::classify_block (69,339,223 samples, 0.02%)</title><rect x="534.8" y="2005" width="0.3" height="15.0" fill="rgb(207,13,3)" rx="2" ry="2" />
+<text  x="537.78" y="2015.5" ></text>
+</g>
+<g >
+<title>index_getnext_slot (29,048,269 samples, 0.01%)</title><rect x="696.6" y="2053" width="0.1" height="15.0" fill="rgb(211,32,7)" rx="2" ry="2" />
+<text  x="699.56" y="2063.5" ></text>
+</g>
+<g >
+<title>_bt_first (142,865,624 samples, 0.05%)</title><rect x="636.7" y="2053" width="0.6" height="15.0" fill="rgb(237,151,36)" rx="2" ry="2" />
+<text  x="639.72" y="2063.5" ></text>
+</g>
+<g >
+<title>postgres (297,854,303,818 samples, 100.00%)</title><rect x="10.0" y="2069" width="1180.0" height="15.0" fill="rgb(233,131,31)" rx="2" ry="2" />
+<text  x="13.00" y="2079.5" >postgres</text>
+</g>
+<g >
+<title>MemoryContextReset (362,389,042 samples, 0.12%)</title><rect x="179.6" y="2037" width="1.4" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text  x="182.58" y="2047.5" ></text>
+</g>
+<g >
+<title>&lt;alloc::vec::into_iter::IntoIter&lt;T,A&gt; as core::iter::traits::iterator::Iterator&gt;::next (96,645,271 samples, 0.03%)</title><rect x="109.7" y="2037" width="0.4" height="15.0" fill="rgb(218,63,15)" rx="2" ry="2" />
+<text  x="112.68" y="2047.5" ></text>
+</g>
+<g >
+<title>std::env::_var_os (54,652,094 samples, 0.02%)</title><rect x="216.0" y="1989" width="0.3" height="15.0" fill="rgb(238,155,37)" rx="2" ry="2" />
+<text  x="219.04" y="1999.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (51,205,664 samples, 0.02%)</title><rect x="1158.7" y="2005" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1161.74" y="2015.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (27,364,073 samples, 0.01%)</title><rect x="1100.0" y="1829" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1102.98" y="1839.5" ></text>
+</g>
+<g >
+<title>HeapTupleSatisfiesVisibility (71,517,340 samples, 0.02%)</title><rect x="79.3" y="2053" width="0.3" height="15.0" fill="rgb(234,136,32)" rx="2" ry="2" />
+<text  x="82.30" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,561,822,319 samples, 0.52%)</title><rect x="245.6" y="1829" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1839.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (147,511,108 samples, 0.05%)</title><rect x="1100.2" y="1909" width="0.6" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1103.17" y="1919.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,585,686,332 samples, 0.53%)</title><rect x="245.6" y="1925" width="6.3" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1935.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (93,731,938 samples, 0.03%)</title><rect x="628.4" y="1925" width="0.4" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="631.44" y="1935.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (1,689,506,894 samples, 0.57%)</title><rect x="368.2" y="1605" width="6.7" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="371.18" y="1615.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (57,886,925 samples, 0.02%)</title><rect x="533.9" y="1941" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="536.93" y="1951.5" ></text>
+</g>
+<g >
+<title>rsonpath::input::padding::TwoSidesPaddedInput::try_slice (121,649,355 samples, 0.04%)</title><rect x="535.2" y="2021" width="0.5" height="15.0" fill="rgb(253,222,53)" rx="2" ry="2" />
+<text  x="538.20" y="2031.5" ></text>
+</g>
+<g >
+<title>&lt;pgrx::iter::TableIterator&lt;Row&gt; as pgrx::callconv::RetAbi&gt;::box_ret_in_fcinfo (147,428,500 samples, 0.05%)</title><rect x="243.8" y="2005" width="0.5" height="15.0" fill="rgb(222,81,19)" rx="2" ry="2" />
+<text  x="246.76" y="2015.5" ></text>
+</g>
+<g >
+<title>ReleaseAndReadBuffer (37,029,066 samples, 0.01%)</title><rect x="185.7" y="2037" width="0.1" height="15.0" fill="rgb(239,157,37)" rx="2" ry="2" />
+<text  x="188.69" y="2047.5" ></text>
+</g>
+<g >
+<title>ExecMakeTableFunctionResult (644,899,671 samples, 0.22%)</title><rect x="66.9" y="2053" width="2.5" height="15.0" fill="rgb(239,157,37)" rx="2" ry="2" />
+<text  x="69.88" y="2063.5" ></text>
+</g>
+<g >
+<title>core::ptr::drop_in_place&lt;alloc::vec::into_iter::IntoIter&lt; (98,491,348 samples, 0.03%)</title><rect x="428.9" y="2037" width="0.4" height="15.0" fill="rgb(231,121,28)" rx="2" ry="2" />
+<text  x="431.89" y="2047.5" ></text>
+</g>
+<g >
+<title>strncpy@plt (34,288,368 samples, 0.01%)</title><rect x="1180.8" y="2053" width="0.2" height="15.0" fill="rgb(245,187,44)" rx="2" ry="2" />
+<text  x="1183.82" y="2063.5" ></text>
+</g>
+<g >
+<title>pgrx::memcxt::PgMemoryContexts::palloc (111,744,603 samples, 0.04%)</title><rect x="261.6" y="2005" width="0.5" height="15.0" fill="rgb(237,148,35)" rx="2" ry="2" />
+<text  x="264.65" y="2015.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="949" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="959.5" ></text>
+</g>
+<g >
+<title>table_open (44,361,839 samples, 0.01%)</title><rect x="541.8" y="2037" width="0.1" height="15.0" fill="rgb(237,147,35)" rx="2" ry="2" />
+<text  x="544.76" y="2047.5" ></text>
+</g>
+<g >
+<title>type_is_rowtype (182,545,878 samples, 0.06%)</title><rect x="548.1" y="2037" width="0.8" height="15.0" fill="rgb(228,109,26)" rx="2" ry="2" />
+<text  x="551.13" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (30,576,297 samples, 0.01%)</title><rect x="650.7" y="2021" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="653.68" y="2031.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (97,672,567 samples, 0.03%)</title><rect x="1100.4" y="1877" width="0.4" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1103.36" y="1887.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="485" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="495.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (20,582,796,060 samples, 6.91%)</title><rect x="294.2" y="1925" width="81.5" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="297.18" y="1935.5" >[[kernel...</text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (41,971,954 samples, 0.01%)</title><rect x="1101.0" y="1781" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1104.02" y="1791.5" ></text>
+</g>
+<g >
+<title>assign_record_type_typmod (154,714,903 samples, 0.05%)</title><rect x="417.6" y="2037" width="0.6" height="15.0" fill="rgb(249,204,48)" rx="2" ry="2" />
+<text  x="420.56" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (13,254,813,235 samples, 4.45%)</title><rect x="323.2" y="1813" width="52.5" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="326.18" y="1823.5" >[[ker..</text>
+</g>
+<g >
+<title>__tls_get_addr (170,026,331 samples, 0.06%)</title><rect x="257.4" y="2005" width="0.6" height="15.0" fill="rgb(246,191,45)" rx="2" ry="2" />
+<text  x="260.37" y="2015.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1205" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1215.5" ></text>
+</g>
+<g >
+<title>heapgettup_pagemode (253,337,181 samples, 0.09%)</title><rect x="280.1" y="2021" width="1.0" height="15.0" fill="rgb(242,170,40)" rx="2" ry="2" />
+<text  x="283.10" y="2031.5" ></text>
+</g>
+<g >
+<title>__memmove_avx_unaligned_erms (38,577,639 samples, 0.01%)</title><rect x="115.4" y="2021" width="0.1" height="15.0" fill="rgb(205,0,0)" rx="2" ry="2" />
+<text  x="118.37" y="2031.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,561,822,319 samples, 0.52%)</title><rect x="245.6" y="1701" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1711.5" ></text>
+</g>
+<g >
+<title>tupledesc_match (126,375,895 samples, 0.04%)</title><rect x="546.9" y="2037" width="0.5" height="15.0" fill="rgb(248,201,48)" rx="2" ry="2" />
+<text  x="549.91" y="2047.5" ></text>
+</g>
+<g >
+<title>_bt_steppage (34,310,302 samples, 0.01%)</title><rect x="266.6" y="2021" width="0.1" height="15.0" fill="rgb(217,58,13)" rx="2" ry="2" />
+<text  x="269.61" y="2031.5" ></text>
+</g>
+<g >
+<title>_bt_first (111,522,207 samples, 0.04%)</title><rect x="264.4" y="2021" width="0.4" height="15.0" fill="rgb(237,151,36)" rx="2" ry="2" />
+<text  x="267.37" y="2031.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (37,465,390 samples, 0.01%)</title><rect x="533.9" y="1909" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="536.95" y="1919.5" ></text>
+</g>
+<g >
+<title>index_getprocinfo (62,827,283 samples, 0.02%)</title><rect x="696.7" y="2053" width="0.2" height="15.0" fill="rgb(238,155,37)" rx="2" ry="2" />
+<text  x="699.67" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (1,130,649,622 samples, 0.38%)</title><rect x="360.1" y="1685" width="4.5" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="363.10" y="1695.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (34,938,510 samples, 0.01%)</title><rect x="628.8" y="1909" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="631.82" y="1919.5" ></text>
+</g>
+<g >
+<title>table_slot_create (38,503,089 samples, 0.01%)</title><rect x="541.9" y="2037" width="0.2" height="15.0" fill="rgb(213,38,9)" rx="2" ry="2" />
+<text  x="544.94" y="2047.5" ></text>
+</g>
+<g >
+<title>lookup_rowtype_tupdesc_copy (55,558,773 samples, 0.02%)</title><rect x="451.7" y="2037" width="0.2" height="15.0" fill="rgb(219,68,16)" rx="2" ry="2" />
+<text  x="454.68" y="2047.5" ></text>
+</g>
+<g >
+<title>heap_attisnull (79,417,797 samples, 0.03%)</title><rect x="442.2" y="2037" width="0.3" height="15.0" fill="rgb(217,56,13)" rx="2" ry="2" />
+<text  x="445.16" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="997" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1007.5" ></text>
+</g>
+<g >
+<title>record_type_typmod_compare (41,048,505 samples, 0.01%)</title><rect x="283.1" y="2021" width="0.1" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="286.07" y="2031.5" ></text>
+</g>
+<g >
+<title>internal_get_result_type (549,546,727 samples, 0.18%)</title><rect x="448.6" y="2037" width="2.2" height="15.0" fill="rgb(251,215,51)" rx="2" ry="2" />
+<text  x="451.59" y="2047.5" ></text>
+</g>
+<g >
+<title>systable_beginscan_ordered (66,252,576 samples, 0.02%)</title><rect x="541.4" y="2037" width="0.3" height="15.0" fill="rgb(213,38,9)" rx="2" ry="2" />
+<text  x="544.39" y="2047.5" ></text>
+</g>
+<g >
+<title>RecoveryInProgress (110,064,054 samples, 0.04%)</title><rect x="101.7" y="2053" width="0.4" height="15.0" fill="rgb(249,205,49)" rx="2" ry="2" />
+<text  x="104.66" y="2063.5" ></text>
+</g>
+<g >
+<title>lookup_rowtype_tupdesc_internal (273,055,771 samples, 0.09%)</title><rect x="451.9" y="2037" width="1.1" height="15.0" fill="rgb(219,67,16)" rx="2" ry="2" />
+<text  x="454.90" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (52,658,396 samples, 0.02%)</title><rect x="1101.0" y="1797" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1103.98" y="1807.5" ></text>
+</g>
+<g >
+<title>memcpy@plt (1,248,696,715 samples, 0.42%)</title><rect x="723.4" y="2053" width="5.0" height="15.0" fill="rgb(224,88,21)" rx="2" ry="2" />
+<text  x="726.43" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (25,571,365 samples, 0.01%)</title><rect x="534.0" y="1861" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="537.00" y="1871.5" ></text>
+</g>
+<g >
+<title>ExecInterpExpr (99,900,645 samples, 0.03%)</title><rect x="65.7" y="2053" width="0.4" height="15.0" fill="rgb(225,96,22)" rx="2" ry="2" />
+<text  x="68.67" y="2063.5" ></text>
+</g>
+<g >
+<title>fill_val (190,857,028 samples, 0.06%)</title><rect x="437.5" y="2037" width="0.8" height="15.0" fill="rgb(230,118,28)" rx="2" ry="2" />
+<text  x="440.53" y="2047.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc14___rust_realloc (105,892,102 samples, 0.04%)</title><rect x="551.0" y="2053" width="0.4" height="15.0" fill="rgb(212,32,7)" rx="2" ry="2" />
+<text  x="553.96" y="2063.5" ></text>
+</g>
+<g >
+<title>LockRelationOid (141,690,863 samples, 0.05%)</title><rect x="94.9" y="2053" width="0.5" height="15.0" fill="rgb(228,108,25)" rx="2" ry="2" />
+<text  x="97.88" y="2063.5" ></text>
+</g>
+<g >
+<title>bms_add_member (94,180,341 samples, 0.03%)</title><rect x="658.9" y="2053" width="0.4" height="15.0" fill="rgb(254,229,54)" rx="2" ry="2" />
+<text  x="661.90" y="2063.5" ></text>
+</g>
+<g >
+<title>LWLockRelease (275,741,879 samples, 0.09%)</title><rect x="175.0" y="2037" width="1.1" height="15.0" fill="rgb(217,58,13)" rx="2" ry="2" />
+<text  x="178.01" y="2047.5" ></text>
+</g>
+<g >
+<title>toast_open_indexes (34,908,617 samples, 0.01%)</title><rect x="1182.0" y="2053" width="0.1" height="15.0" fill="rgb(239,158,37)" rx="2" ry="2" />
+<text  x="1184.99" y="2063.5" ></text>
+</g>
+<g >
+<title>LWLockAttemptLock (1,724,657,340 samples, 0.58%)</title><rect x="81.8" y="2053" width="6.8" height="15.0" fill="rgb(235,138,33)" rx="2" ry="2" />
+<text  x="84.76" y="2063.5" ></text>
+</g>
+<g >
+<title>nvme_setup_cmd (56,903,935 samples, 0.02%)</title><rect x="375.2" y="1717" width="0.2" height="15.0" fill="rgb(243,175,41)" rx="2" ry="2" />
+<text  x="378.18" y="1727.5" ></text>
+</g>
+<g >
+<title>rsonpath::automaton::minimizer::Minimizer::normalize_superstate_transitions::normalize_one (779,225,330 samples, 0.26%)</title><rect x="1114.0" y="2053" width="3.1" height="15.0" fill="rgb(209,21,5)" rx="2" ry="2" />
+<text  x="1117.00" y="2063.5" ></text>
+</g>
+<g >
+<title>btoidcmp (152,745,490 samples, 0.05%)</title><rect x="659.9" y="2053" width="0.6" height="15.0" fill="rgb(222,81,19)" rx="2" ry="2" />
+<text  x="662.91" y="2063.5" ></text>
+</g>
+<g >
+<title>_bt_mark_scankey_required (79,367,057 samples, 0.03%)</title><rect x="265.1" y="2021" width="0.4" height="15.0" fill="rgb(235,139,33)" rx="2" ry="2" />
+<text  x="268.14" y="2031.5" ></text>
+</g>
+<g >
+<title>MemoryContextAllocZero (172,853,363 samples, 0.06%)</title><rect x="177.9" y="2037" width="0.7" height="15.0" fill="rgb(228,108,25)" rx="2" ry="2" />
+<text  x="180.92" y="2047.5" ></text>
+</g>
+<g >
+<title>ExecInterpExpr (1,519,575,132 samples, 0.51%)</title><rect x="150.4" y="2037" width="6.0" height="15.0" fill="rgb(225,96,22)" rx="2" ry="2" />
+<text  x="153.41" y="2047.5" ></text>
+</g>
+<g >
+<title>oideq (35,955,183 samples, 0.01%)</title><rect x="728.7" y="2053" width="0.1" height="15.0" fill="rgb(239,160,38)" rx="2" ry="2" />
+<text  x="731.68" y="2063.5" ></text>
+</g>
+<g >
+<title>_bt_metaversion (37,711,825 samples, 0.01%)</title><rect x="402.2" y="2037" width="0.2" height="15.0" fill="rgb(221,74,17)" rx="2" ry="2" />
+<text  x="405.24" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,535,628,930 samples, 0.52%)</title><rect x="245.6" y="85" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.63" y="95.5" ></text>
+</g>
+<g >
+<title>FunctionNext (96,698,220 samples, 0.03%)</title><rect x="172.0" y="2037" width="0.4" height="15.0" fill="rgb(219,65,15)" rx="2" ry="2" />
+<text  x="175.02" y="2047.5" ></text>
+</g>
+<g >
+<title>ResourceOwnerEnlargeBuffers (82,631,789 samples, 0.03%)</title><rect x="103.8" y="2053" width="0.4" height="15.0" fill="rgb(242,170,40)" rx="2" ry="2" />
+<text  x="106.84" y="2063.5" ></text>
+</g>
+<g >
+<title>&lt;rsonpath::input::borrowed::BorrowedBytes as rsonpath::input::Input&gt;::seek_backward (222,878,096 samples, 0.07%)</title><rect x="50.0" y="2053" width="0.8" height="15.0" fill="rgb(212,36,8)" rx="2" ry="2" />
+<text  x="52.96" y="2063.5" ></text>
+</g>
+<g >
+<title>SysCacheGetAttr (264,142,414 samples, 0.09%)</title><rect x="235.4" y="2037" width="1.0" height="15.0" fill="rgb(214,42,10)" rx="2" ry="2" />
+<text  x="238.36" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1541" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1551.5" ></text>
+</g>
+<g >
+<title>pgrx_pg_sys::submodules::panic::run_guarded (194,039,305 samples, 0.07%)</title><rect x="256.3" y="1989" width="0.7" height="15.0" fill="rgb(209,22,5)" rx="2" ry="2" />
+<text  x="259.27" y="1999.5" ></text>
+</g>
+<g >
+<title>rsonpath_syntax::parser::child_segment (238,632,714 samples, 0.08%)</title><rect x="1173.3" y="2053" width="0.9" height="15.0" fill="rgb(244,180,43)" rx="2" ry="2" />
+<text  x="1176.27" y="2063.5" ></text>
+</g>
+<g >
+<title>hash_bytes (288,627,046 samples, 0.10%)</title><rect x="677.2" y="2053" width="1.2" height="15.0" fill="rgb(227,102,24)" rx="2" ry="2" />
+<text  x="680.25" y="2063.5" ></text>
+</g>
+<g >
+<title>AllocSetContextCreateInternal (199,858,224 samples, 0.07%)</title><rect x="244.3" y="2005" width="0.8" height="15.0" fill="rgb(211,30,7)" rx="2" ry="2" />
+<text  x="247.34" y="2015.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="789" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="799.5" ></text>
+</g>
+<g >
+<title>toast_fetch_datum (130,186,160 samples, 0.04%)</title><rect x="544.3" y="2037" width="0.5" height="15.0" fill="rgb(246,193,46)" rx="2" ry="2" />
+<text  x="547.33" y="2047.5" ></text>
+</g>
+<g >
+<title>_bt_saveitem (40,554,677 samples, 0.01%)</title><rect x="638.3" y="2053" width="0.1" height="15.0" fill="rgb(235,139,33)" rx="2" ry="2" />
+<text  x="641.27" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1253" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1263.5" ></text>
+</g>
+<g >
+<title>_bt_compare (572,482,474 samples, 0.19%)</title><rect x="634.4" y="2053" width="2.3" height="15.0" fill="rgb(254,225,53)" rx="2" ry="2" />
+<text  x="637.40" y="2063.5" ></text>
+</g>
+<g >
+<title>table_close (27,321,048 samples, 0.01%)</title><rect x="541.7" y="2037" width="0.1" height="15.0" fill="rgb(241,166,39)" rx="2" ry="2" />
+<text  x="544.65" y="2047.5" ></text>
+</g>
+<g >
+<title>pgstat_init_function_usage (83,118,480 samples, 0.03%)</title><rect x="469.8" y="2037" width="0.4" height="15.0" fill="rgb(235,141,33)" rx="2" ry="2" />
+<text  x="472.83" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="837" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="847.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (26,854,698 samples, 0.01%)</title><rect x="385.3" y="2021" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="388.29" y="2031.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1173" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1183.5" ></text>
+</g>
+<g >
+<title>ss_search (30,061,809 samples, 0.01%)</title><rect x="541.2" y="2037" width="0.1" height="15.0" fill="rgb(244,181,43)" rx="2" ry="2" />
+<text  x="544.17" y="2047.5" ></text>
+</g>
+<g >
+<title>ExecStoreMinimalTuple (131,737,271 samples, 0.04%)</title><rect x="72.4" y="2053" width="0.5" height="15.0" fill="rgb(244,180,43)" rx="2" ry="2" />
+<text  x="75.41" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1301" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1311.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,549,584,509 samples, 0.52%)</title><rect x="245.6" y="357" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="367.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1509" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1519.5" ></text>
+</g>
+<g >
+<title>index_endscan (26,056,666 samples, 0.01%)</title><rect x="696.5" y="2053" width="0.1" height="15.0" fill="rgb(208,17,4)" rx="2" ry="2" />
+<text  x="699.46" y="2063.5" ></text>
+</g>
+<g >
+<title>ResourceOwnerRememberLock (50,707,940 samples, 0.02%)</title><rect x="104.9" y="2053" width="0.2" height="15.0" fill="rgb(205,0,0)" rx="2" ry="2" />
+<text  x="107.92" y="2063.5" ></text>
+</g>
+<g >
+<title>CheckForSerializableConflictOutNeeded (33,280,763 samples, 0.01%)</title><rect x="147.4" y="2037" width="0.1" height="15.0" fill="rgb(213,38,9)" rx="2" ry="2" />
+<text  x="150.40" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (75,527,645 samples, 0.03%)</title><rect x="364.2" y="1605" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="367.21" y="1615.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (64,708,636 samples, 0.02%)</title><rect x="1100.9" y="1845" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1103.93" y="1855.5" ></text>
+</g>
+<g >
+<title>rsonpath_syntax::parser::parse_with_options (115,900,385 samples, 0.04%)</title><rect x="228.1" y="2005" width="0.4" height="15.0" fill="rgb(252,217,51)" rx="2" ry="2" />
+<text  x="231.05" y="2015.5" ></text>
+</g>
+<g >
+<title>ExecJustConst (204,514,704 samples, 0.07%)</title><rect x="66.1" y="2053" width="0.8" height="15.0" fill="rgb(221,77,18)" rx="2" ry="2" />
+<text  x="69.07" y="2063.5" ></text>
+</g>
+<g >
+<title>_int_malloc (328,328,381 samples, 0.11%)</title><rect x="267.2" y="2021" width="1.3" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="270.18" y="2031.5" ></text>
+</g>
+<g >
+<title>rsonpath_syntax::parser::parse_with_options (179,704,246 samples, 0.06%)</title><rect x="540.4" y="2037" width="0.7" height="15.0" fill="rgb(252,217,51)" rx="2" ry="2" />
+<text  x="543.42" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1109" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1119.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1237" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1247.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,547,406,221 samples, 0.52%)</title><rect x="245.6" y="277" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.59" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (60,456,663 samples, 0.02%)</title><rect x="533.9" y="1973" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="536.92" y="1983.5" ></text>
+</g>
+<g >
+<title>ResourceOwnerRememberTupleDesc (78,879,215 samples, 0.03%)</title><rect x="105.3" y="2053" width="0.3" height="15.0" fill="rgb(247,196,46)" rx="2" ry="2" />
+<text  x="108.30" y="2063.5" ></text>
+</g>
+<g >
+<title>pgrx::iter::empty_srf (256,141,659 samples, 0.09%)</title><rect x="465.8" y="2037" width="1.0" height="15.0" fill="rgb(234,137,32)" rx="2" ry="2" />
+<text  x="468.79" y="2047.5" ></text>
+</g>
+<g >
+<title>hash_search_with_hash_value (64,287,056 samples, 0.02%)</title><rect x="254.5" y="1989" width="0.2" height="15.0" fill="rgb(249,205,49)" rx="2" ry="2" />
+<text  x="257.48" y="1999.5" ></text>
+</g>
+<g >
+<title>StrategyGetBuffer (39,064,370 samples, 0.01%)</title><rect x="106.0" y="2053" width="0.2" height="15.0" fill="rgb(216,54,13)" rx="2" ry="2" />
+<text  x="109.04" y="2063.5" ></text>
+</g>
+<g >
+<title>relation_open (64,826,942 samples, 0.02%)</title><rect x="1110.8" y="2053" width="0.2" height="15.0" fill="rgb(227,105,25)" rx="2" ry="2" />
+<text  x="1113.77" y="2063.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc13___rdl_dealloc (62,637,544 samples, 0.02%)</title><rect x="550.4" y="2053" width="0.2" height="15.0" fill="rgb(213,38,9)" rx="2" ry="2" />
+<text  x="553.36" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (53,464,930 samples, 0.02%)</title><rect x="715.8" y="1957" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="718.81" y="1967.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (27,506,038 samples, 0.01%)</title><rect x="414.4" y="1973" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="417.38" y="1983.5" ></text>
+</g>
+<g >
+<title>RelationDecrementReferenceCount (27,172,906 samples, 0.01%)</title><rect x="102.4" y="2053" width="0.1" height="15.0" fill="rgb(214,44,10)" rx="2" ry="2" />
+<text  x="105.39" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (49,696,930 samples, 0.02%)</title><rect x="1133.3" y="1957" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1136.31" y="1967.5" ></text>
+</g>
+<g >
+<title>__memmove_avx_unaligned_erms (136,089,664 samples, 0.05%)</title><rect x="209.6" y="1973" width="0.5" height="15.0" fill="rgb(205,0,0)" rx="2" ry="2" />
+<text  x="212.59" y="1983.5" ></text>
+</g>
+<g >
+<title>detoast_attr (1,010,535,581 samples, 0.34%)</title><rect x="430.6" y="2037" width="4.0" height="15.0" fill="rgb(254,227,54)" rx="2" ry="2" />
+<text  x="433.63" y="2047.5" ></text>
+</g>
+<g >
+<title>alloc::sync::Arc&lt;T,A&gt;::drop_slow (167,291,819 samples, 0.06%)</title><rect x="202.6" y="2005" width="0.7" height="15.0" fill="rgb(218,62,14)" rx="2" ry="2" />
+<text  x="205.64" y="2015.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc11___rdl_alloc (64,054,682 samples, 0.02%)</title><rect x="191.1" y="2021" width="0.3" height="15.0" fill="rgb(224,90,21)" rx="2" ry="2" />
+<text  x="194.14" y="2031.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (25,664,137 samples, 0.01%)</title><rect x="1101.1" y="1765" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1104.08" y="1775.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,681,939,998 samples, 0.56%)</title><rect x="245.6" y="1957" width="6.6" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1967.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (30,040,471 samples, 0.01%)</title><rect x="650.7" y="1989" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="653.68" y="1999.5" ></text>
+</g>
+<g >
+<title>__memcmp_avx2_movbe (292,789,570 samples, 0.10%)</title><rect x="263.0" y="2021" width="1.2" height="15.0" fill="rgb(224,91,21)" rx="2" ry="2" />
+<text  x="266.04" y="2031.5" ></text>
+</g>
+<g >
+<title>TransactionStartedDuringRecovery (104,155,738 samples, 0.03%)</title><rect x="107.3" y="2053" width="0.4" height="15.0" fill="rgb(229,112,26)" rx="2" ry="2" />
+<text  x="110.26" y="2063.5" ></text>
+</g>
+<g >
+<title>RelationClose (25,629,130 samples, 0.01%)</title><rect x="185.5" y="2037" width="0.1" height="15.0" fill="rgb(208,18,4)" rx="2" ry="2" />
+<text  x="188.45" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (32,718,465 samples, 0.01%)</title><rect x="650.7" y="2037" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="653.67" y="2047.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (55,534,683 samples, 0.02%)</title><rect x="1133.3" y="1989" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1136.29" y="1999.5" ></text>
+</g>
+<g >
+<title>rsonpath::automaton::minimizer::minimize (228,953,135 samples, 0.08%)</title><rect x="186.8" y="2005" width="0.9" height="15.0" fill="rgb(205,3,0)" rx="2" ry="2" />
+<text  x="189.83" y="2015.5" ></text>
+</g>
+<g >
+<title>ExecScanReScan (40,895,127 samples, 0.01%)</title><rect x="170.2" y="2037" width="0.2" height="15.0" fill="rgb(242,173,41)" rx="2" ry="2" />
+<text  x="173.24" y="2047.5" ></text>
+</g>
+<g >
+<title>DataChecksumsEnabled (72,249,718 samples, 0.02%)</title><rect x="148.2" y="2037" width="0.3" height="15.0" fill="rgb(226,96,23)" rx="2" ry="2" />
+<text  x="151.17" y="2047.5" ></text>
+</g>
+<g >
+<title>std::sys::env::unix::getenv::_$u7b$$u7b$closure$u7d$$u7d$::h7dd91abadbbdb17b (53,643,042 samples, 0.02%)</title><rect x="215.8" y="1973" width="0.2" height="15.0" fill="rgb(219,66,15)" rx="2" ry="2" />
+<text  x="218.83" y="1983.5" ></text>
+</g>
+<g >
+<title>GetPrivateRefCountEntry (257,958,835 samples, 0.09%)</title><rect x="77.9" y="2053" width="1.0" height="15.0" fill="rgb(250,209,50)" rx="2" ry="2" />
+<text  x="80.90" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="1285" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1295.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,533,936,837 samples, 0.51%)</title><rect x="245.6" y="53" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.64" y="63.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (51,205,664 samples, 0.02%)</title><rect x="1158.7" y="1989" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1161.74" y="1999.5" ></text>
+</g>
+<g >
+<title>&lt;pgrx::callconv::Args as core::iter::traits::iterator::Iterator&gt;::next (92,986,685 samples, 0.03%)</title><rect x="188.5" y="2021" width="0.3" height="15.0" fill="rgb(223,85,20)" rx="2" ry="2" />
+<text  x="191.48" y="2031.5" ></text>
+</g>
+<g >
+<title>GetPrivateRefCountEntry (174,242,303 samples, 0.06%)</title><rect x="172.4" y="2037" width="0.7" height="15.0" fill="rgb(250,209,50)" rx="2" ry="2" />
+<text  x="175.44" y="2047.5" ></text>
+</g>
+<g >
+<title>pfree (177,099,581 samples, 0.06%)</title><rect x="729.8" y="2053" width="0.7" height="15.0" fill="rgb(239,160,38)" rx="2" ry="2" />
+<text  x="732.81" y="2063.5" ></text>
+</g>
+<g >
+<title>_bt_checkkeys (199,247,351 samples, 0.07%)</title><rect x="633.6" y="2053" width="0.8" height="15.0" fill="rgb(241,165,39)" rx="2" ry="2" />
+<text  x="636.62" y="2063.5" ></text>
+</g>
+<g >
+<title>hash_search_with_hash_value (2,186,402,926 samples, 0.73%)</title><rect x="679.3" y="2053" width="8.7" height="15.0" fill="rgb(249,205,49)" rx="2" ry="2" />
+<text  x="682.31" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,561,822,319 samples, 0.52%)</title><rect x="245.6" y="1669" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1679.5" ></text>
+</g>
+<g >
+<title>heapgettup_pagemode (186,121,224 samples, 0.06%)</title><rect x="695.3" y="2053" width="0.7" height="15.0" fill="rgb(242,170,40)" rx="2" ry="2" />
+<text  x="698.28" y="2063.5" ></text>
+</g>
+<g >
+<title>__memmove_avx_unaligned_erms (43,405,192 samples, 0.01%)</title><rect x="264.2" y="2021" width="0.2" height="15.0" fill="rgb(205,0,0)" rx="2" ry="2" />
+<text  x="267.20" y="2031.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (69,061,655 samples, 0.02%)</title><rect x="364.9" y="1701" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="367.92" y="1711.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="677" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="687.5" ></text>
+</g>
+<g >
+<title>alloc::raw_vec::RawVec&lt;T,A&gt;::grow_one (446,214,540 samples, 0.15%)</title><rect x="652.8" y="2053" width="1.7" height="15.0" fill="rgb(248,200,47)" rx="2" ry="2" />
+<text  x="655.78" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (25,967,045 samples, 0.01%)</title><rect x="1133.3" y="1941" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1136.32" y="1951.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,535,628,930 samples, 0.52%)</title><rect x="245.6" y="117" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.63" y="127.5" ></text>
+</g>
+<g >
+<title>__memmove_avx_unaligned_erms (60,106,723 samples, 0.02%)</title><rect x="642.4" y="2037" width="0.3" height="15.0" fill="rgb(205,0,0)" rx="2" ry="2" />
+<text  x="645.41" y="2047.5" ></text>
+</g>
+<g >
+<title>ExecAgg (388,456,715 samples, 0.13%)</title><rect x="148.5" y="2037" width="1.5" height="15.0" fill="rgb(250,207,49)" rx="2" ry="2" />
+<text  x="151.45" y="2047.5" ></text>
+</g>
+<g >
+<title>pgrx_pg_sys::submodules::thread_check::check_active_thread (87,926,162 samples, 0.03%)</title><rect x="469.3" y="2037" width="0.4" height="15.0" fill="rgb(229,113,27)" rx="2" ry="2" />
+<text  x="472.30" y="2047.5" ></text>
+</g>
+<g >
+<title>cee_scape::asm_based::call_with_sigsetjmp::call_from_c_to_rust (89,124,528 samples, 0.03%)</title><rect x="259.3" y="2005" width="0.3" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="262.26" y="2015.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (2,238,471,781 samples, 0.75%)</title><rect x="366.0" y="1653" width="8.9" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="369.00" y="1663.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (34,858,744 samples, 0.01%)</title><rect x="374.7" y="1557" width="0.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="377.73" y="1567.5" ></text>
+</g>
+<g >
+<title>fmgr_info_copy (69,187,348 samples, 0.02%)</title><rect x="667.8" y="2053" width="0.2" height="15.0" fill="rgb(244,182,43)" rx="2" ry="2" />
+<text  x="670.77" y="2063.5" ></text>
+</g>
+<g >
+<title>RelationGetIndexScan (45,195,537 samples, 0.02%)</title><rect x="102.5" y="2053" width="0.2" height="15.0" fill="rgb(222,81,19)" rx="2" ry="2" />
+<text  x="105.50" y="2063.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,550,633,616 samples, 0.52%)</title><rect x="245.6" y="501" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="511.5" ></text>
+</g>
+<g >
+<title>heapam_index_fetch_tuple (95,650,238 samples, 0.03%)</title><rect x="279.6" y="2021" width="0.4" height="15.0" fill="rgb(254,225,53)" rx="2" ry="2" />
+<text  x="282.64" y="2031.5" ></text>
+</g>
+<g >
+<title>[unknown] (2,000,161,960 samples, 0.67%)</title><rect x="245.6" y="1989" width="7.9" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1999.5" ></text>
+</g>
+<g >
+<title>_int_free (1,109,163,116 samples, 0.37%)</title><rect x="638.4" y="2053" width="4.4" height="15.0" fill="rgb(247,196,46)" rx="2" ry="2" />
+<text  x="641.43" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (92,221,954 samples, 0.03%)</title><rect x="1100.8" y="1861" width="0.4" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="1103.82" y="1871.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,548,508,453 samples, 0.52%)</title><rect x="245.6" y="309" width="6.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="319.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (860,446,720 samples, 0.29%)</title><rect x="371.5" y="1573" width="3.4" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="374.46" y="1583.5" ></text>
+</g>
+<g >
+<title>rsonpath::classification::structural::shared::vector_256::BlockClassifier256::classify_block (183,829,551 samples, 0.06%)</title><rect x="1170.4" y="2021" width="0.8" height="15.0" fill="rgb(207,13,3)" rx="2" ry="2" />
+<text  x="1173.42" y="2031.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (12,030,853,450 samples, 4.04%)</title><rect x="328.0" y="1781" width="47.7" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="331.00" y="1791.5" >[[ke..</text>
+</g>
+<g >
+<title>[unknown] (1,622,886,003 samples, 0.54%)</title><rect x="245.6" y="1941" width="6.4" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1951.5" ></text>
+</g>
+<g >
+<title>_RNvCsiGVaDesi5rv_7___rustc14___rust_dealloc (45,331,914 samples, 0.02%)</title><rect x="550.8" y="2053" width="0.2" height="15.0" fill="rgb(252,218,52)" rx="2" ry="2" />
+<text  x="553.78" y="2063.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (27,765,677 samples, 0.01%)</title><rect x="687.9" y="2037" width="0.1" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="690.86" y="2047.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,561,822,319 samples, 0.52%)</title><rect x="245.6" y="1861" width="6.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="248.58" y="1871.5" ></text>
+</g>
+<g >
+<title>pgstat_end_function_usage (128,346,437 samples, 0.04%)</title><rect x="1109.1" y="2053" width="0.5" height="15.0" fill="rgb(243,175,41)" rx="2" ry="2" />
+<text  x="1112.13" y="2063.5" ></text>
+</g>
+</g>
+</svg>
