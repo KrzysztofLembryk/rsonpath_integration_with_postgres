@@ -17,7 +17,7 @@ SIZE_225_MB = 1_000_000
 SIZE_450_MB = 2_000_000
 SIZE_900_MB = 4_000_000
 
-NUM_RECORDS = SIZE_450_MB 
+NUM_RECORDS = SIZE_900_MB 
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "large.json")
 

@@ -152,11 +152,17 @@ mod tests {
     const JSONB_COL_NAME: &str = "jsonb";
     const N_ITERS: usize = 3;
     const ONE_MB: f64 = (1024 * 1024) as f64;
+
+    const RSONPATH_EXTENSIONS: &'static [&'static str] = &[
+        "rsonpath_ext_json",
+        "rsonpath_ext_str",
+        "rsonpath_ext_count",
+        ];
     const EXTENSIONS: &'static [&'static str] = &[
         "rsonpath_ext_json",
         "rsonpath_ext_str",
         "rsonpath_ext_count",
-        "jsonpath",
+        // "jsonpath",
         ];
     const SMALL_JSON: &str = include_str!("../tests/testdata/small.json");
     const MEDIUM_JSON: &str = include_str!("../tests/testdata/medium.json");
@@ -456,23 +462,80 @@ mod tests {
         return start.elapsed().as_secs_f64() * 1000.0 / iters as f64;
     }
 
+    /// The schema of the generated table is dynamically constructed based on the
+    /// provided column names. By conditionally supplying `Some` or `None` for 
+    /// `json_col_name` and `jsonb_col_name`, you can control exactly which data 
+    /// types are in the table:
+    /// 
+    /// * Supplying `Some` for both creates a table with both `JSON` AND `JSONB` 
+    /// columns.
+    /// * Supplying `Some` for one and `None` for the other yields a table 
+    /// exclusively containing that specific data type.
+    /// * Supplying `None` for both arguments is invalid and will trigger a panic.
+    /// 
+    /// * `disable_toast` - If set to `true`, alters the column storage strategy to 
+    /// `EXTERNAL`, effectively disabling default TOAST compression (pglz/lz4) to 
+    ///  isolate query performance.
     fn create_json_table(
         table_name: &str, 
-        json_col_name: &str, 
-        jsonb_col_name: &str
+        json_col_name: Option<&str>, 
+        jsonb_col_name: Option<&str>,
+        disable_toast: bool
     ) -> f64
     {
         let start = Instant::now();
+        let mut table_create_cmd = format!("
+                CREATE TABLE {table_name} (
+                id SERIAL PRIMARY KEY,");
 
-        Spi::run(&format!(
-            "CREATE TABLE {} (
-            id SERIAL PRIMARY KEY,
-            {} JSON,
-            {} JSONB
-             );", 
-            table_name, json_col_name, jsonb_col_name)
-        ).expect(&format!("Failed to create table: {}", table_name));
+        if let (Some(json_col), Some(jsonb_col)) = (json_col_name, jsonb_col_name)
+        {
+            table_create_cmd = format!(
+                "
+                    {table_create_cmd}\n
+                    {json_col} JSON,\n
+                    {jsonb_col} JSONB);
+                "
+            );
 
+            if disable_toast
+            {
+                table_create_cmd = format!("{table_create_cmd}\n
+                ALTER TABLE {table_name} ALTER COLUMN {json_col} SET STORAGE EXTERNAL;\n
+                ALTER TABLE {table_name} ALTER COLUMN {jsonb_col} SET STORAGE EXTERNAL;")
+            }
+        }
+        else if let Some(json_col) = json_col_name
+        {
+            table_create_cmd = format!("
+                {table_create_cmd}\n
+                {json_col} JSON);
+            ");
+
+            if disable_toast
+            {
+                table_create_cmd = format!("{table_create_cmd}\n
+                ALTER TABLE {table_name} ALTER COLUMN {json_col} SET STORAGE EXTERNAL;")
+            }
+        }
+        else if let Some(jsonb_col) = jsonb_col_name
+        {
+            table_create_cmd = format!("
+                {table_create_cmd}\n
+                {jsonb_col} JSONB);
+            ");
+            if disable_toast
+            {
+                table_create_cmd = format!("{table_create_cmd}\n
+                ALTER TABLE {table_name} ALTER COLUMN {jsonb_col} SET STORAGE EXTERNAL;")
+            }
+        }
+        else
+        {
+            panic!("create_json_table got json_col and jsonb_col both NONE");
+        }
+
+        Spi::run(&table_create_cmd).expect(&format!("Failed to create table: {} with json and jsonb cols", table_name));
         return start.elapsed().as_secs_f64() * 1000.0;
     }
 
@@ -486,59 +549,135 @@ mod tests {
 
     fn insert_data_into_json_table(
         table_name: &str, 
-        json_col_name: &str, 
-        jsonb_col_name: &str, 
+        json_col_name: Option<&str>, 
+        jsonb_col_name: Option<&str>, 
         data: &str
     ) -> f64
     {
         let start = Instant::now();
 
-        Spi::run(&format!(
-            "INSERT INTO {} ({}, {}) VALUES ('{}', '{}');",
-            table_name,
-            json_col_name,
-            jsonb_col_name,
-            escape_sql(data),
-            escape_sql(data)
-        )).expect("insert_data_into_json_table:: Failed to insert JSON data");
+        let mut insert_cmd = format!("
+                INSERT INTO {table_name} ");
+
+        if let (Some(json_col), Some(jsonb_col)) = (json_col_name, jsonb_col_name)
+        {
+            insert_cmd = format!("{insert_cmd}({json_col},{jsonb_col}) VALUES ('{}', '{}');", escape_sql(data), escape_sql(data));
+        }
+        else if let Some(json_col) = json_col_name
+        {
+            insert_cmd = format!("{insert_cmd}({json_col}) VALUES ('{}');", escape_sql(data));
+        }
+        else if let Some(jsonb_col) = jsonb_col_name
+        {
+            insert_cmd = format!("{insert_cmd}({jsonb_col}) VALUES ('{}');", escape_sql(data));
+        }
+        else
+        {
+            panic!("create_json_table got json_col and jsonb_col both NONE");
+        }
+
+        Spi::run(&insert_cmd).expect(&format!("Failed to create table: {} with json and jsonb cols", table_name));
 
         return start.elapsed().as_secs_f64() * 1000.0;
     }
 
-    #[pg_test]
-    fn test_performance_large() 
-    {
-        // Spi::run("SET client_min_messages = WARNING;").unwrap();
+    macro_rules! init_test {
+        (
+            $title:expr, 
+            $report:ident, 
+            $table_name:ident, 
+            $json_col_name:ident, 
+            $jsonb_col_name:ident, 
+            $large_jsons:ident, 
+            $table_op_times:ident
+        ) => {
+            let mut $report = String::new();
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
 
-        let mut report = String::new();
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+            writeln!($report, "{} (epoch: {})", $title, timestamp).unwrap();
+            writeln!($report, "{:<55} {:>12} {:>10} {:>12}",
+                "Test", "JSON MB", "Iters", "Avg (ms)").unwrap();
+            writeln!($report, "{}", "-".repeat(80)).unwrap();
 
-        writeln!(report, "# perf results (epoch: {})", timestamp).unwrap();
-        writeln!(report, "{:<55} {:>12} {:>10} {:>12}",
-            "Test", "JSON MB", "Iters", "Avg (ms)").unwrap();
-        writeln!(report, "{}", "-".repeat(80)).unwrap();
+            let $table_name = TABLE_NAME;
+            let $json_col_name = JSON_COL_NAME;
+            let $jsonb_col_name = JSONB_COL_NAME;
+            let $large_jsons = get_all_large_jsons("/tests/testdata/");
+            let mut $table_op_times: Vec<(String, f64, f64)> = vec![];
+        };
+    }
 
-        let table_name = TABLE_NAME;
-        let json_col_name = JSON_COL_NAME;
-        let jsonb_col_name = JSONB_COL_NAME;
-        let mut table_op_times: Vec<(String, f64, f64)> = vec![];
+    macro_rules! prepare_table {
+        (
+            $json_path:expr,
+            $table_name:expr,
+            $json_col_name:expr,
+            $jsonb_col_name:expr,
+            $disable_toast:expr,
+            $large_json:ident,
+            $json_size_mb:ident,
+            $creation_time:ident,
+            $insertion_time:ident,
+            $table_op_times:expr
+    
+        ) => {
 
-        for json_path in LARGE_JSONS
-        {
-            let large_json = load_json(*json_path);
-            let json_size_mb = (large_json.len() as f64) / ONE_MB;
+            let $large_json = load_json($json_path);
+            let $json_size_mb = ($large_json.len() as f64) / ONE_MB;
 
-            let creation_time = create_json_table(table_name, json_col_name, jsonb_col_name);
-            let insertion_time = insert_data_into_json_table(table_name, json_col_name, jsonb_col_name, &large_json);
+            let $creation_time = create_json_table(
+                    $table_name, 
+                    $json_col_name, 
+                    $jsonb_col_name,
+                    $disable_toast
+                );
+            let $insertion_time = insert_data_into_json_table(
+                $table_name, 
+                $json_col_name, 
+                $jsonb_col_name, 
+                &$large_json
+            );
 
-            table_op_times.push((
-                String::from(*json_path), 
-                creation_time, 
-                insertion_time
+            $table_op_times.push((
+                String::from($json_path), 
+                $creation_time, 
+                $insertion_time
             ));
+        };
+    }
+
+    #[pg_test]
+    fn test_performance_large_no_toast()
+    {
+        let disable_toast = true;
+
+        init_test!(
+            "Test performance no TOAST", 
+            report, 
+            table_name, 
+            json_col_name, 
+            jsonb_col_name, 
+            large_jsons, 
+            table_op_times
+        );
+
+        for json_path in large_jsons.iter()
+        {
+            prepare_table!(
+                json_path,
+                table_name,
+                Some(json_col_name),
+                Some(jsonb_col_name),
+                disable_toast,
+                large_json,
+                json_size_mb,
+                creation_time,
+                insertion_time,
+                table_op_times
+            );
 
             for test_case in TEST_CASES_LARGE 
             {
@@ -579,42 +718,100 @@ mod tests {
         });
     }
 
+    #[pg_test]
+    fn test_performance_large() 
+    {
+        init_test!(
+            "Test performance large", 
+            report, 
+            table_name, 
+            json_col_name, 
+            jsonb_col_name, 
+            large_jsons, 
+            table_op_times
+        );
+
+        for json_path in large_jsons.iter()
+        {
+            prepare_table!(
+                json_path,
+                table_name,
+                Some(json_col_name),
+                Some(jsonb_col_name),
+                false,
+                large_json,
+                json_size_mb,
+                creation_time,
+                insertion_time,
+                table_op_times
+            );
+
+            for test_case in TEST_CASES_LARGE 
+            {
+                for ext_name in EXTENSIONS
+                {
+                    pgrx::info!("START: {}#{}", ext_name, test_case.name);
+                    let query = test_case.query;
+                    let sql = build_sql(
+                        *ext_name, 
+                        query, 
+                        table_name,  
+                        json_col_name,
+                        jsonb_col_name,
+                    );
+                    let iters = N_ITERS;
+                    let warmup_iters = 1;
+                    let avg_ms = bench_and_discard_results(&sql, warmup_iters, iters);
+
+                    writeln!(report, "{:<55} {:>12.2} {:>10} {:>12.4}",
+                        format!("{}# {}", ext_name, query), 
+                        json_size_mb, 
+                        iters, 
+                        avg_ms
+                    ).unwrap();
+                }
+                
+            }
+            drop_json_table(table_name);
+        }
+
+        for op_time in table_op_times.iter()
+        {
+            writeln!(report, "JSON: {}\n --creation_time: {:.2} ms\n --insertion_time: {:.2} ms", op_time.0, op_time.1, op_time.2).unwrap();
+        }
+
+        std::fs::write(PERF_RESULTS_PATH, &report).unwrap_or_else(|e| {
+            panic!("Failed to write perf results to {}: {}", PERF_RESULTS_PATH, e)
+        });
+    }
 
     #[pg_test]
     fn test_performance_jsonpath() 
     {
-        // Spi::run("SET client_min_messages = WARNING;").unwrap();
-
-        let mut report = String::new();
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        writeln!(report, "# perf results (epoch: {})", timestamp).unwrap();
-        writeln!(report, "{:<55} {:>12} {:>10} {:>12}",
-            "Test", "JSON MB", "Iters", "Avg (ms)").unwrap();
-        writeln!(report, "{}", "-".repeat(80)).unwrap();
-
-        let table_name = TABLE_NAME;
-        let json_col_name = JSON_COL_NAME;
-        let jsonb_col_name = JSONB_COL_NAME;
-        let large_jsons = get_all_large_jsons("/tests/testdata/");
-        let mut table_op_times: Vec<(String, f64, f64)> = vec![];
+        init_test!(
+            "Jsonpath results", 
+            report, 
+            table_name, 
+            json_col_name, 
+            jsonb_col_name, 
+            large_jsons, 
+            table_op_times
+        );
 
         for json_path in large_jsons.iter()
         {
-            let large_json = load_json(json_path);
-            let json_size_mb = (large_json.len() as f64) / ONE_MB;
-
-            let creation_time = create_json_table(table_name, json_col_name, jsonb_col_name);
-            let insertion_time = insert_data_into_json_table(table_name, json_col_name, jsonb_col_name, &large_json);
-
-            table_op_times.push((
-                String::from(json_path), 
-                creation_time, 
-                insertion_time
-            ));
+            prepare_table!(
+                json_path,
+                table_name,
+                Some(json_col_name),
+                Some(jsonb_col_name),
+                false,
+                large_json,
+                json_size_mb,
+                creation_time,
+                insertion_time,
+                table_op_times
+            );
 
             for test_case in TEST_CASES_LARGE 
             {
@@ -682,6 +879,7 @@ mod tests {
 
         return large_jsons;
     }
+
 
     // #[pg_test]
     // fn test_performance_med_small() 
