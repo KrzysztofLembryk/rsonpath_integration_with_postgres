@@ -1,7 +1,7 @@
 # Results TOAST vs no TOAST for rsonpath
 
 ```
-SIZE: 908 MB
+SIZE: 908 MB - on harddrive is 943 MB without TOAST,  309 MB with TOAST
            query           | method | avg_ms_no_TOAST   |  avg_ms  | diff_ms
 ---------------------------+----------+--------------+-----------+-----------
  $.records[*].address.city | r_json | 3849.416          | 4611.137 | +761.721
@@ -30,4 +30,30 @@ SIZE: 89.67 MB
  $.records[*].name         | r_str  | 300.837          | 337.032 | +36.195
  $.records[*].scores[*]    | r_json | 706.078          | 757.570 | +51.492
  $.records[*].scores[*]    | r_str  | 655.480          | 690.015 | +34.535
+```
+
+# perf
+
+```bash
++   46,75%  postgres  [.] PortalRunSelect 
++   46,75%  postgres  [.] standard_ExecutorRun
++   46,19%  postgres  [.] fetch_input_tuple 
++   45,87%  postgres  [.] ExecNestLoop
+
++   39,71%  postgres  [.] ExecMakeTableFunctionResult
++   33,81%  postgres  [.] randomize_mem
++   32,32%  postgres  [.] AllocSetAlloc
++   27,11%  postgres  [.] palloc
+
+
+# konwersja do tekstu
++   25,07%  postgres                 [.] ExecInterpExpr
++   16,76%  postgres                 [.] text_to_cstring
++    7,24%  postgres                 [.] cstring_to_text (inlined)
++    7,17%  rsonpath_postgres_ext.so [.] 
+
++    4,76%  rsonpath_postgres_ext.so [.] main::Executor<I,R,
++    3,38%  rsonpath_postgres_ext.so [.] rsonpath::engine::tail_skipping
++    3,13%  rsonpath_postgres_ext.so [.] <rsonpath::result::nodes::NodesRecorder<B,S> 
++    1,56%  rsonpath_postgres_ext.so [.] rsonpath::engine::main::Executor<I,R,V>::run 
 ```
