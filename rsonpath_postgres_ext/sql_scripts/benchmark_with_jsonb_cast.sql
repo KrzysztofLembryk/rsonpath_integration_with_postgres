@@ -1,5 +1,5 @@
 -- Benchmark jsonpath on json with cast to jsonb 
--- --> data generated via generate_testdata.py with SIZE_90_MB = 400_000
+-- --> data generated via generate_testdata.py with SIZE_90_MB
 -- #################################################################################
 -- Results:
 --            query           | avg_time_ms |  count  | json_size_mb 

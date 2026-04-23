@@ -88,3 +88,15 @@ FROM json_table,
 
 # BENCHMARK
 - in postgres json field max 1 GB, jsonb max 200MB
+
+# how to run tests from cmd in pgrx
+- for example: ```cargo pgrx test pg16 --release -- test_performance_large_no_toast```
+
+# using perf
+- run ```cargo pgrx run --release ```
+- then inside postgres ```SELECT pg_backend_pid();```
+- then in other terminal: ```sudo perf record -p PID -g --call-graph dwarf -F 99```
+- after postgres query ends issue ctrl+c command in perf terminal 
+- to see report: ```sudo perf report```
+- to create flamegrapg: ```sudo perf script | ./FlameGraph/stackcollapse-perf.pl | ./FlameGraph/flamegraph.pl > perf_flamegraph.svg```
+- to download flamegraph scripts: ```git clone https://github.com/brendangregg/FlameGraph.git```

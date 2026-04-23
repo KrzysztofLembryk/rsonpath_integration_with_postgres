@@ -1,36 +1,33 @@
--- REMEMBER to run in !!! RELEASE !!!
--- Time: 461896,559 ms (07:41,897) for 900MB
---            query           |      method       | json_size_mb |  avg_ms  
--- ---------------------------+-------------------+--------------+----------
---  $.records[*].address.city | rsonpath_ext_json |      908.275 | 4611.137
---  $.records[*].address.city | rsonpath_ext_str  |      908.275 | 4376.405
---  $.records[*].name         | rsonpath_ext_json |      908.275 | 4321.123
---  $.records[*].name         | rsonpath_ext_str  |      908.275 | 4013.329
---  $.records[*].scores[*]    | rsonpath_ext_json |      908.275 | 9513.402
---  $.records[*].scores[*]    | rsonpath_ext_str  |      908.275 | 8979.106
+-- benchmark_rsonpath no TOAST
+-- SIZE: 908 MB
+--            query           | method | avg_ms_no_TOAST   |  avg_ms  | diff_ms
+-- ---------------------------+----------+--------------+-----------+-----------
+--  $.records[*].address.city | r_json | 3849.416          | 4611.137 | +761.721
+--  $.records[*].address.city | r_str  | 3634.400          | 4376.405 | +742.005
+--  $.records[*].name         | r_json | 3564.332          | 4321.123 | +756.791
+--  $.records[*].name         | r_str  | 3273.918          | 4013.329 | +739.411
+--  $.records[*].scores[*]    | r_json | 7818.417          | 9513.402 | +1694.985
+--  $.records[*].scores[*]    | r_str  | 7103.813          | 8979.106 | +1875.293
 
+-- SIZE: 225 MB
+--            query           | method | avg_ms_no_TOAST   | avg_ms   | diff_ms
+-- ---------------------------+----------+--------------+- -----------------
+--  $.records[*].address.city | r_json | 885.905           |  971.247 | +85.342
+--  $.records[*].address.city | r_str  | 843.103           |  910.318 | +67.215
+--  $.records[*].name         | r_json | 803.516           |  918.419 | +114.903
+--  $.records[*].name         | r_str  | 756.246           |  862.711 | +106.465
+--  $.records[*].scores[*]    | r_json | 1908.303          | 1893.580 | -14.723
+--  $.records[*].scores[*]    | r_str  | 1681.221          | 1751.229 | +70.008
 
--- Time: 119741,553 ms (01:59,742)
---            query           |      method       | json_size_mb |  avg_ms   | ext_ms
--- ---------------------------+-------------------+--------------+-------------------
---  $.records[*].address.city | rsonpath_ext_json |      224.669 | 10901.796 | 8727 
---  $.records[*].address.city | rsonpath_ext_str  |      224.669 | 10183.218 | 8055 
---  $.records[*].name         | rsonpath_ext_json |      224.669 |  7018.159 | 5286 
---  $.records[*].name         | rsonpath_ext_str  |      224.669 |  6880.815 | 5151
---  $.records[*].scores[*]    | rsonpath_ext_json |      224.669 | 12389.811 | 8464 
---  $.records[*].scores[*]    | rsonpath_ext_str  |      224.669 | 11997.557 | 8859 
-
-
---            query           |      method       | json_size_mb | avg_ms  
--------------------------+-------------------+--------------+---------
---  $.records[*].address.city | rsonpath_ext_json |       89.674 | 385.736
---  $.records[*].address.city | rsonpath_ext_str  |       89.674 | 363.977
---  $.records[*].name         | rsonpath_ext_json |       89.674 | 355.665
---  $.records[*].name         | rsonpath_ext_str  |       89.674 | 337.032
---  $.records[*].scores[*]    | rsonpath_ext_json |       89.674 | 757.570
---  $.records[*].scores[*]    | rsonpath_ext_str  |       89.674 | 690.015
-
-
+-- SIZE: 89.67 MB
+--            query           | method | avg_ms_no_TOAST  | avg_ms  | diff_ms
+-- ---------------------------+----------+--------------+------------------
+--  $.records[*].address.city | r_json | 345.589          | 385.736 | +40.147
+--  $.records[*].address.city | r_str  | 329.307          | 363.977 | +34.670
+--  $.records[*].name         | r_json | 308.016          | 355.665 | +47.649
+--  $.records[*].name         | r_str  | 300.837          | 337.032 | +36.195
+--  $.records[*].scores[*]    | r_json | 706.078          | 757.570 | +51.492
+--  $.records[*].scores[*]    | r_str  | 655.480          | 690.015 | +34.535
 
 \set ON_ERROR_STOP on
 \timing on
@@ -42,6 +39,9 @@ CREATE UNLOGGED TABLE bench_json (
     id   bigserial PRIMARY KEY,
     data json NOT NULL
 );
+
+-- Disable TOAST compression
+ALTER TABLE bench_json ALTER COLUMN data SET STORAGE EXTERNAL;
 
 COPY bench_json(data)
 FROM '/tmp/large.json';
