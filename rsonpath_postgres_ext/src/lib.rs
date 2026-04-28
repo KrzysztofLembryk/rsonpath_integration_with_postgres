@@ -10,7 +10,7 @@ use rsonpath::{
 };
 use pgrx::iter::TableIterator;
 
-#[pg_extern]
+#[pg_extern(immutable, parallel_safe)]
 fn rsonpath_ext_str(
     query: &str,
     json_str: &str,
@@ -26,7 +26,7 @@ fn rsonpath_ext_str(
     TableIterator::new(results)
 }
 
-#[pg_extern]
+#[pg_extern(immutable, parallel_safe)]
 fn rsonpath_ext_str_timed(
     query: &str,
     json_str: &str,
@@ -50,7 +50,7 @@ fn rsonpath_ext_str_timed(
     TableIterator::new(results)
 }
 
-#[pg_extern]
+#[pg_extern(immutable, parallel_safe)]
 fn rsonpath_ext_json(
     query: &str, 
     json_str: &str
@@ -70,7 +70,7 @@ fn rsonpath_ext_json(
 }
 
 
-#[pg_extern]
+#[pg_extern(immutable, parallel_safe)]
 fn rsonpath_ext_json_timed(
     query: &str, 
     json_str: &str
@@ -97,7 +97,7 @@ fn rsonpath_ext_json_timed(
     return TableIterator::new(results);
 }
 
-#[pg_extern]
+#[pg_extern(immutable, parallel_safe)]
 fn rsonpath_ext_jsonb(
     query: &str, 
     json_str: &str
@@ -116,7 +116,7 @@ fn rsonpath_ext_jsonb(
     return TableIterator::new(results);
 }
 
-#[pg_extern]
+#[pg_extern(immutable, parallel_safe)]
 fn rsonpath_ext_count(query: &str, json_str: &str) -> i64
 {
     let query = rsonpath_syntax::parse(query).expect("query parse error");
