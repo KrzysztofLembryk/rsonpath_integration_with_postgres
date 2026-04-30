@@ -58,7 +58,7 @@ BEGIN
         END LOOP;
         
         INSERT INTO benchmark_results (query, count, json_size_mb, avg_time_ms)
-        VALUES (q, round((total_time / num_runs)::numeric, 3), cnt, js_size_mb);
+        VALUES (q, cnt, js_size_mb, round((total_time / num_runs)::numeric, 3));
         
     END LOOP;
 
