@@ -89,6 +89,18 @@ FROM json_table,
 # BENCHMARK
 - in postgres json field max 1 GB, jsonb max 200MB
 
+# Recompiling postgres so that it doesn't have debug symbols
+
+```bash
+cd ~/.pgrx/13.23
+make clean
+./configure --prefix=$HOME/.pgrx/13.23/pgrx-install --with-pgport=28813
+make -j$(nproc)
+make install
+```
+- afterwards command ```SHOW debug_assertions;``` should return off
+
+
 # how to run tests from cmd in pgrx
 - for example: ```cargo pgrx test pg16 --release -- test_performance_large_no_toast```
 
@@ -100,3 +112,5 @@ FROM json_table,
 - to see report: ```sudo perf report```
 - to create flamegrapg: ```sudo perf script | ./FlameGraph/stackcollapse-perf.pl | ./FlameGraph/flamegraph.pl > perf_flamegraph.svg```
 - to download flamegraph scripts: ```git clone https://github.com/brendangregg/FlameGraph.git```
+
+# 
