@@ -18,12 +18,11 @@ fn rsonpath_ext_str(
 {
     let sink_vec = run_qeury(query, json_str);
 
-    let results: Vec<(i64, String)> = sink_vec.into_iter()
+    let results_iter  = sink_vec.into_iter()
         .enumerate()
-        .map(|(i, val)| (i as i64, String::from_utf8_lossy(val.bytes()).into_owned()))
-        .collect();
+        .map(|(i, val)| (i as i64, String::from_utf8_lossy(val.bytes()).into_owned()));
 
-    TableIterator::new(results)
+    TableIterator::new(results_iter)
 }
 
 #[pg_extern(immutable, parallel_safe)]
@@ -39,15 +38,14 @@ fn rsonpath_ext_str_timed(
     pgrx::notice!("rsonpath_str took: {:?}", elapsed_run_query);
 
     let now = Instant::now();
-    let results: Vec<(i64, String)> = sink_vec.into_iter()
+    let results_iter = sink_vec.into_iter()
         .enumerate()
-        .map(|(i, val)| (i as i64, String::from_utf8_lossy(val.bytes()).into_owned()))
-        .collect();
+        .map(|(i, val)| (i as i64, String::from_utf8_lossy(val.bytes()).into_owned()));
     let elapsed_aggregate_results = now.elapsed();
 
     pgrx::notice!("results_str aggregation took: {:?}", elapsed_aggregate_results);
 
-    TableIterator::new(results)
+    return TableIterator::new(results_iter);
 }
 
 #[pg_extern(immutable, parallel_safe)]
@@ -58,15 +56,14 @@ fn rsonpath_ext_json(
 {
     let sink_vec = run_qeury(query, json_str);
 
-    let results: Vec<(i64, pgrx::Json)> = sink_vec.iter()
+    let results_iter = sink_vec.into_iter()
         .enumerate()
         .map(|(i, val)| {
-            let raw = String::from_utf8_lossy(val.bytes()).into_owned();
-            (i as i64, pgrx::Json(serde_json::from_str(&raw).unwrap()))
-        })
-        .collect();
+            let parsed_json = serde_json::from_slice(val.bytes()).unwrap();
+            (i as i64, pgrx::Json(parsed_json))
+        });
 
-    return TableIterator::new(results);
+    return TableIterator::new(results_iter);
 }
 
 
@@ -83,18 +80,17 @@ fn rsonpath_ext_json_timed(
     pgrx::notice!("rsonpath_json took: {:?}", elapsed_run_query);
 
     let now = Instant::now();
-    let results: Vec<(i64, pgrx::Json)> = sink_vec.iter()
+    let results_iter = sink_vec.into_iter()
         .enumerate()
         .map(|(i, val)| {
-            let raw = String::from_utf8_lossy(val.bytes()).into_owned();
-            (i as i64, pgrx::Json(serde_json::from_str(&raw).unwrap()))
-        })
-        .collect();
+            let parsed_json = serde_json::from_slice(val.bytes()).unwrap();
+            (i as i64, pgrx::Json(parsed_json))
+        });
     let elapsed_aggregate_results = now.elapsed();
 
     pgrx::notice!("results_json aggregation took: {:?}", elapsed_aggregate_results);
 
-    return TableIterator::new(results);
+    return TableIterator::new(results_iter);
 }
 
 #[pg_extern(immutable, parallel_safe)]
@@ -132,12 +128,34 @@ fn run_qeury(query: &str, json_str: &str) -> Vec<Match>
     let input = BorrowedBytes::new(json_str.as_bytes());
     let engine = RsonpathEngine::compile_query(&query).expect("engine compile error");
     let mut sink_vec = Vec::new();
-
     engine.matches(&input, &mut sink_vec)
         .expect("Engine count error");
 
     return sink_vec;
 }
+
+
+fn check_if_subjson_exists(json_str: &str, query: &str) -> bool
+{
+    let query = rsonpath_syntax::parse(query).expect("query parse error");
+    let input = BorrowedBytes::new(json_str.as_bytes());
+    let engine = RsonpathEngine::compile_query(&query).expect("engine compile error");
+
+    return engine.count(&input).expect("engine count error") as i64 > 0;
+}
+
+#[pg_extern(immutable, parallel_safe, strict)] 
+#[opname(@@)] // operator symbol in SQL
+fn rsonpath_contains(json_str: &str,query: &str) -> bool {
+    // We pass whole json from row, then we check if at there is at least one sub-json 
+    // that satisfies query. 
+    // We Return true if there is.
+    // Currently we would need to use count to accomplish this.
+    // But to make it more optimal, we would need a function that stops once it finds
+    // first match
+    return check_if_subjson_exists(json_str, query);
+}
+
 
 #[cfg(any(test, feature = "pg_test"))]
 #[pg_schema]
@@ -153,11 +171,6 @@ mod tests {
     const N_ITERS: usize = 3;
     const ONE_MB: f64 = (1024 * 1024) as f64;
 
-    const RSONPATH_EXTENSIONS: &'static [&'static str] = &[
-        "rsonpath_ext_json",
-        "rsonpath_ext_str",
-        "rsonpath_ext_count",
-        ];
     const EXTENSIONS: &'static [&'static str] = &[
         "rsonpath_ext_json",
         "rsonpath_ext_str",

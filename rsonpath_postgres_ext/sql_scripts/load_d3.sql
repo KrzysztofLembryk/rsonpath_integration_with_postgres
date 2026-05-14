@@ -14,7 +14,7 @@ CREATE UNLOGGED TABLE d3_papers (
 
 \echo 'Loading D3 data...'
 COPY d3_papers(data) FROM PROGRAM
-    'sed ''s/\\/\\\\/g'' /home/dominik/uw/projekt_badawczy/rsonpath_integration_with_postgres/rsonpath_postgres_ext/tests/testdata/d3/papers.jsonl'
+    'sed ''s/\\/\\\\/g'' /home/krzych/Studia/magisterka/proj_badawczy/rsonpath_postgres_ext/tests/testdata/d3/papers.jsonl'
     WITH (FORMAT text, DELIMITER E'\b');
 
 SELECT count(*) AS row_count,

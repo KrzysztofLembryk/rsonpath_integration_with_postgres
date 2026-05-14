@@ -13,11 +13,11 @@ CREATE TEMP TABLE bench_queries (
 );
 
 INSERT INTO bench_queries(query_name, query_path) VALUES
-    ('scalar_title',          '$.title'),
-    ('scalar_year',           '$.year'),
-    ('nested_obj_doi',        '$.externalids.DOI'),
-    ('array_author_names',    '$.authors[*].name'),
-    ('array_fos_categories',  '$.s2fieldsofstudy[*].category');
+    -- ('scalar_title',          '$.title'),
+    -- ('scalar_year',           '$.year'),
+    -- ('nested_obj_doi',        '$.externalids.DOI'),
+    ('array_author_names',    '$.authors[*].name'); --,
+    -- ('array_fos_categories',  '$.s2fieldsofstudy[*].category');
 
 DROP TABLE IF EXISTS bench_results;
 CREATE TEMP TABLE bench_results (
