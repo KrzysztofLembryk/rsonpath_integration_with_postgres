@@ -102,8 +102,6 @@ SELECT
     method, 
     match_count, 
     round(avg(elapsed_ms), 3) AS avg_ms
-    -- round(min(elapsed_ms), 3) AS min_ms,
-    -- round(max(elapsed_ms), 3) AS max_ms
 FROM bench_results
-GROUP BY query_name, method, match_count
-ORDER BY query_name, avg_ms;
+GROUP BY query_path, method, match_count
+ORDER BY query_path, avg_ms;
