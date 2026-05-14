@@ -122,3 +122,25 @@ In d3 dataset each json (row in our table) is not huge, like 40~80MB
 
 ## $.nested1.nested2.countries[*]
 ![auth name](./plots/plot_nested1_nested2_countries.png) 
+
+
+## Explain analyze '$.email1'
+- jsonpath:
+```
+Aggregate  (cost=225164.00..225164.01 rows=1 width=8) (actual time=15937.205..15937.206 rows=1 loops=1)
+   ->  Nested Loop  (cost=0.00..200164.00 rows=10000000 width=0) (actual time=54.564..15936.010 rows=10000 loops=1)
+         ->  Seq Scan on data_1mb_jsons_jsonb p  (cost=0.00..164.00 rows=10000 width=18) (actual time=45.643..48.484 rows=10000 loops=1)
+         ->  Function Scan on jsonb_path_query  (cost=0.00..10.00 rows=1000 width=0) (actual time=1.588..1.588 rows=1 loops=10000)
+ Planning Time: 0.075 ms
+ Execution Time: 15937.235 ms
+```
+
+- rsonpath:
+```
+Aggregate  (cost=225164.01..225164.02 rows=1 width=8) (actual time=50197.950..50197.951 rows=1 loops=1)
+   ->  Nested Loop  (cost=0.01..200164.01 rows=10000000 width=0) (actual time=7.783..50193.014 rows=10000 loops=1)
+         ->  Seq Scan on data_1mb_jsons p  (cost=0.00..164.00 rows=10000 width=18) (actual time=0.276..6.934 rows=10000 loops=1)
+         ->  Function Scan on rsonpath_ext_json  (cost=0.01..10.01 rows=1000 width=0) (actual time=5.017..5.017 rows=1 loops=10000)
+ Planning Time: 0.050 ms
+ Execution Time: 50197.971 ms
+```
