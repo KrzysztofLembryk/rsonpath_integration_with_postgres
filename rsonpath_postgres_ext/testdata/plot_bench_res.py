@@ -82,6 +82,14 @@ $.year|rsonpath_gin_filter_only|123236.915
 $.year|jsonpath_no_cast_gin|50861.641
 $.year|rsonpath_ext_count_gin|177597.530"""
 
+data_hobby = """query_name|method|match_count|avg_ms
+$.hobby[*]|jsonpath|3734|16732.731
+$.hobby[*]|rsonpath_ext_count|3734|45581.357
+$.hobby[*]|jsonpath_gin_filter_only|932|12944.118
+$.hobby[*]|rsonpath_gin_filter_only|932|8067.662
+$.hobby[*]|jsonpath_gin|3734|13912.647
+$.hobby[*]|rsonpath_ext_count_gin|3734|12682.805"""
+
 
 def create_plots(data):
     df = pd.read_csv(io.StringIO(data), sep='|')
@@ -125,5 +133,6 @@ def create_plots(data):
 
 
 if __name__ == "__main__":
-    create_plots(data=data_gin)
+    # create_plots(data=data_gin)
+    create_plots(data=data_hobby)
 

@@ -72,3 +72,19 @@
 
 ## $.year
 ![auth name](./plots/for_d3_with_gin/plot_year_gin.png) 
+
+# Results for our jsonl generated which has around 10% hobby keys
+```
+  query_path |          method          | match_count |  avg_ms   
+ ------------+--------------------------+-------------+-----------
+  $.hobby[*] | jsonpath                 |        3734 | 16732.731
+  $.hobby[*] | rsonpath_ext_count       |        3734 | 45581.357
+
+  $.hobby[*] | jsonpath_gin_filter_only |         932 | 12944.118
+  $.hobby[*] | rsonpath_gin_filter_only |         932 |  8067.662
+  $.hobby[*] | jsonpath_gin             |        3734 | 13912.647
+  $.hobby[*] | rsonpath_ext_count_gin   |        3734 | 12682.805
+```
+
+## $.hobby[\*]
+![hobby](./plots/for_d3_with_gin/plot_hobby.png) 
