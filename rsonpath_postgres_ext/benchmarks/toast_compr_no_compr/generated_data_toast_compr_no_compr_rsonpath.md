@@ -1,4 +1,4 @@
-# Results for TOAST with vs TOAST without compression for rsonpath
+# Results for TOAST with vs TOAST without compression for rsonpath on generated data
 
 ```sql
 SIZE: 908 MB - on harddrive is 943 MB without compression, 309 MB with
