@@ -26,7 +26,7 @@ CREATE TEMP TABLE bench_queries (
 INSERT INTO bench_queries(query_name, query_path) VALUES
     ('scalar_email',            '$.email1'),
     ('scalar_address_city',     '$.address1.city1'),
-    -- ('array_tags',              '$.tags1[*]'),
+    ('array_tags',              '$.tags1[*]'),
     -- ('array_cities',            '$.cities[*]'),
     ('nested_array_countries',  '$.nested1.nested2.countries[*]'),
     ('conditional_hobby',       '$.hobby[*]');
