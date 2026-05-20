@@ -2,7 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import io
 
-# 1. Provide the tabular data as a raw string
+# tabular data as a raw string
 data_d3 = """query_name|method|match_count|avg_ms|min_ms|max_ms
 $.authors[*].name|jsonpath|18784025|35042.522|35042.522|35042.522
 $.authors[*].name|rsonpath_ext_count|18784025|40516.415|40516.415|40516.415
@@ -44,7 +44,6 @@ $.nested1.nested2.countries[*]|rsonpath_ext_json|300000000|102454.666
 $.nested1.nested2.countries[*]|jsonpath|300000000|421832.793"""
 
 
-# 2. Load into into a Pandas DataFrame
 df1 = pd.read_csv(io.StringIO(data_d3), sep='|')
 df2 = pd.read_csv(io.StringIO(data_generated_json_1mb), sep='|')
 df = pd.concat([df1, df2], ignore_index=True)
@@ -53,20 +52,15 @@ df.columns = df.columns.str.strip()
 df['query_name'] = df['query_name'].str.strip()
 df['method'] = df['method'].str.strip()
 
-# Set an aesthetic style
 plt.style.use('ggplot')
 
-# 3. Get unique query names
 queries = df['query_name'].unique()
 
 for query in queries:
-    # Filter data for this specific query
+    # Filter data for specific query
     subset = df[df['query_name'] == query]
     
-    # Sort so the bars are in a consistent order
     subset = subset.sort_values(by='avg_ms')
-    
-    # Create the plot
     fig, ax = plt.subplots(figsize=(10, 6))
     
     bars = ax.bar(subset['method'], subset['avg_ms'], color=['#348ABD', '#7A68A6', '#A60628', '#467821'][:len(subset)])
@@ -75,7 +69,6 @@ for query in queries:
     ax.set_ylabel('Average Execution Time (ms)', fontsize=12)
     ax.set_xlabel('Method', fontsize=12)
     
-    # Add exact time labels above the bars
     for bar in bars:
         height = bar.get_height()
         ax.annotate(f'{height:.0f} ms',
@@ -84,7 +77,6 @@ for query in queries:
                     textcoords="offset points",
                     ha='center', va='bottom', fontsize=11)
     
-    # Adjust layout and save string matching the query name replacing special chars
     plt.xticks(rotation=15)
     plt.tight_layout()
     filename_safe = query.replace('$', '').replace('.', '_').replace('[*]', '').replace('[', '_').replace(']', '')
@@ -93,6 +85,4 @@ for query in queries:
     plt.savefig(filename, dpi=300)
     print(f"Saved plot: {filename}")
     
-    # If running interactively you can also show it:
-    # plt.show()
     plt.close()
