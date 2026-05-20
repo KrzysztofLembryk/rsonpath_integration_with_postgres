@@ -22,7 +22,6 @@ CREATE TEMP TABLE bench_queries (
     query_path text NOT NULL
 );
 
--- Queries targeting the schema from generate_testdata.py
 INSERT INTO bench_queries(query_name, query_path) VALUES
     ('scalar_email',            '$.email1'),
     ('scalar_address_city',     '$.address1.city1'),
@@ -58,7 +57,7 @@ BEGIN
         PERFORM sum(rsonpath_ext_count(q.query_path, p.data::text)) FROM data_1mb_jsons p;
 
         FOR i IN 1..runs LOOP
-            -- 1. rsonpath (Count matches)
+            -- rsonpath Count
             t0 := clock_timestamp();
             SELECT sum(rsonpath_ext_count(q.query_path, p.data::text)) INTO cnt
             FROM data_1mb_jsons p;
@@ -66,7 +65,7 @@ BEGIN
             INSERT INTO bench_results VALUES
                 ('rsonpath_ext_count', q.query_name, q.query_path, i, ms, cnt);
 
-            -- 2. rsonpath (Extract strings)
+            -- rsonpath str 
             t0 := clock_timestamp();
             SELECT count(*) INTO cnt
             FROM data_1mb_jsons p,
@@ -75,7 +74,7 @@ BEGIN
             INSERT INTO bench_results VALUES
                 ('rsonpath_ext_str', q.query_name, q.query_path, i, ms, cnt);
 
-            -- 3. rsonpath (Extract JSON)
+            -- rsonpath json
             t0 := clock_timestamp();
             SELECT count(*) INTO cnt
             FROM data_1mb_jsons p,
@@ -93,7 +92,7 @@ BEGIN
             INSERT INTO bench_results VALUES
                 ('jsonpath_with_cast', q.query_name, q.query_path, i, ms, cnt);
 
-            -- 4. native Postgres jsonpath
+            -- jsonpath without cast
             t0 := clock_timestamp();
             SELECT count(*) INTO cnt
             FROM data_1mb_jsons_jsonb p,

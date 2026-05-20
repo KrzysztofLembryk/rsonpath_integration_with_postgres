@@ -65,7 +65,7 @@ BEGIN
         FOR i IN 1..runs LOOP
             
             ---------------------------------------------------------
-            -- 1. BASELINES (Full Scans)
+            -- BASELINES (Full Scans)
             ---------------------------------------------------------
             
             -- rsonpath count 
@@ -85,14 +85,13 @@ BEGIN
                  LATERAL jsonb_path_query(p.data, q.query_path::jsonpath);
 
             ms := round((extract(epoch FROM (clock_timestamp() - t0)) * 1000.0)::numeric, 3);
-            INSERT INTO bench_results VALUES ('jsonpath', q.query_name, q.query_path, i, ms, cnt);
-
+            INSERT INTO bench_results VALUES ('jsonpath_no_cast', q.query_name, q.query_path, i, ms, cnt);
 
             ---------------------------------------------------------
-            -- 2. GIN FILTER ONLY (Checks existence per document)
+            -- GIN FILTER ONLY
             ---------------------------------------------------------
             
-            -- rsonpath boolean match (pure filtering overhead with GIN)
+            -- rsonpath 
             t0 := clock_timestamp();
 
             SELECT count(*) INTO cnt
@@ -101,7 +100,7 @@ BEGIN
             ms := round((extract(epoch FROM (clock_timestamp() - t0)) * 1000.0)::numeric, 3);
             INSERT INTO bench_results VALUES ('rsonpath_gin_filter_only', q.query_name, q.query_path, i, ms, cnt);
 
-            -- jsonpath pure filter with GIN (@? operator)
+            -- jsonpath 
             t0 := clock_timestamp();
 
             SELECT count(*) INTO cnt
@@ -111,7 +110,7 @@ BEGIN
             INSERT INTO bench_results VALUES ('jsonpath_gin_filter_only', q.query_name, q.query_path, i, ms, cnt);
 
             ---------------------------------------------------------
-            -- 3. GIN ACCELERATED EXTRACTION
+            -- GIN ACCELERATED EXTRACTION
             ---------------------------------------------------------
             
             -- rsonpath count with GIN filter
@@ -123,7 +122,7 @@ BEGIN
             ms := round((extract(epoch FROM (clock_timestamp() - t0)) * 1000.0)::numeric, 3);
             INSERT INTO bench_results VALUES ('rsonpath_ext_count_gin', q.query_name, q.query_path, i, ms, cnt);
 
-            -- jsonpath without cast with GIN filter
+            -- jsonpath with GIN filter
             t0 := clock_timestamp();
 
             SELECT count(*) INTO cnt
