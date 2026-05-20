@@ -1,4 +1,5 @@
 use pgrx::prelude::*;
+use pgrx::pg_sys;
 
 ::pgrx::pg_module_magic!(name, version);
 
@@ -157,6 +158,64 @@ fn rsonpath_contains(json_str: &str,query: &str) -> bool {
     // first match
     return check_if_subjson_exists(json_str, query);
 }
+
+// GIN INDEX for rsonpath
+
+use serde_json::Value;
+
+fn get_all_paths(value: &Value, current_path: String, paths: &mut Vec<String>) {
+    match value {
+        Value::Object(map) => {
+            for (key, val) in map {
+                let next_path = if current_path.is_empty() {
+                    format!("$.{}", key)
+                } else {
+                    format!("{}.{}", current_path, key)
+                };
+                paths.push(next_path.clone());
+                get_all_paths(val, next_path, paths);
+            }
+        }
+        Value::Array(arr) => {
+            for (index, val) in arr.iter().enumerate() {
+                let next_path = format!("{}[{}]", current_path, index);
+                paths.push(next_path.clone());
+                get_all_paths(val, next_path, paths);
+            }
+        }
+        _ => {} // Primitive values (String, Number, Bool, Null) - paths already added
+    }
+}
+
+#[pg_extern(immutable, parallel_safe)]
+fn rsonpath_gin_extract_keys(json_str: &str) -> Vec<String> {
+    
+    let json_value: Value = serde_json::from_str(json_str).unwrap();
+    let mut all_paths = Vec::new();
+
+    get_all_paths(&json_value, "$".to_string(), &mut all_paths);
+
+    //  GIN indexes prefer unique keys per document
+    all_paths.sort();
+    all_paths.dedup();
+    return all_paths;
+}
+
+// Takes path query string, returns the keys you want to look up in the GIN index.
+// i.e. '$.person.name', we return ['$.person.name']
+// #[pg_extern(immutable, parallel_safe)]
+// fn rsonpath_gin_extract_query(
+//     query: &str,
+//     _internal_strategy: i16, 
+//     _pmatch: i16,
+//     _extra_data: pg_sys::Pointer,
+//     _null_flags: pg_sys::Pointer,
+//     _search_mode: pg_sys::Pointer,
+// ) -> Vec<String> {
+//     vec![query.to_string()]
+// }
+
+// CREATE INDEX my_json_gin_idx ON json_table USING GIN (rsonpath_gin_extract_keys(json::text));
 
 
 #[cfg(any(test, feature = "pg_test"))]
