@@ -2,6 +2,8 @@ use pgrx::prelude::*;
 
 ::pgrx::pg_module_magic!(name, version);
 
+mod gin;
+
 use std::time::Instant;
 use rsonpath::input::BorrowedBytes;
 use rsonpath::result::Match;
