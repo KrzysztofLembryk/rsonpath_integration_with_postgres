@@ -44,45 +44,86 @@ $.nested1.nested2.countries[*]|rsonpath_ext_json|300000000|102454.666
 $.nested1.nested2.countries[*]|jsonpath|300000000|421832.793"""
 
 
-df1 = pd.read_csv(io.StringIO(data_d3), sep='|')
-df2 = pd.read_csv(io.StringIO(data_generated_json_1mb), sep='|')
-df = pd.concat([df1, df2], ignore_index=True)
+data_gin = """query_name|method|avg_ms
+$.authors[*]|jsonpath|31017.942
+$.authors[*]|rsonpath_ext_count|38463.632
+$.authors[*]|jsonpath_gin_filter_only|29912.751
+$.authors[*]|rsonpath_gin_filter_only|122774.589
+$.authors[*]|jsonpath_gin|43363.805
+$.authors[*]|rsonpath_ext_count_gin|182492.981
+$.authors[*].name|jsonpath|32042.751
+$.authors[*].name|rsonpath_ext_count|40757.772
+$.authors[*].name|jsonpath_gin_filter_only|28578.241
+$.authors[*].name|rsonpath_gin_filter_only|123370.361
+$.authors[*].name|jsonpath_gin|44683.012
+$.authors[*].name|rsonpath_ext_count_gin|182256.538
+$.externalids.DOI|jsonpath|30297.759
+$.externalids.DOI|rsonpath_ext_count|39582.676
+$.externalids.DOI|jsonpath_gin_filter_only|28701.365
+$.externalids.DOI|rsonpath_gin_filter_only|121153.205
+$.externalids.DOI|rsonpath_ext_count_gin|179755.093
+$.externalids.DOI|jsonpath_no_cast_gin|42322.891
+$.s2fieldsofstudy[*].category|jsonpath_no_cast|32686.583
+$.s2fieldsofstudy[*].category|rsonpath_ext_count|41525.881
+$.s2fieldsofstudy[*].category|jsonpath_gin_filter_only|29971.203
+$.s2fieldsofstudy[*].category|rsonpath_gin_filter_only|131670.548
+$.s2fieldsofstudy[*].category|jsonpath_no_cast_gin|43203.366
+$.s2fieldsofstudy[*].category|rsonpath_ext_count_gin|187935.905
+$.title|jsonpath_no_cast|30971.067
+$.title|rsonpath_ext_count|37639.887
+$.title|jsonpath_gin_filter_only|28962.579
+$.title|rsonpath_gin_filter_only|124687.104
+$.title|jsonpath_no_cast_gin|41993.778
+$.title|rsonpath_ext_count_gin|180043.974
+$.year|jsonpath_no_cast|31055.175
+$.year|rsonpath_ext_count|39061.697
+$.year|jsonpath_gin_filter_only|36552.025
+$.year|rsonpath_gin_filter_only|123236.915
+$.year|jsonpath_no_cast_gin|50861.641
+$.year|rsonpath_ext_count_gin|177597.530"""
 
-df.columns = df.columns.str.strip()
-df['query_name'] = df['query_name'].str.strip()
-df['method'] = df['method'].str.strip()
 
-plt.style.use('ggplot')
+def create_plots(data):
+    df = pd.read_csv(io.StringIO(data), sep='|')
+    df.columns = df.columns.str.strip()
+    df['query_name'] = df['query_name'].str.strip()
+    df['method'] = df['method'].str.strip()
 
-queries = df['query_name'].unique()
+    plt.style.use('ggplot')
+    queries = df['query_name'].unique()
 
-for query in queries:
-    # Filter data for specific query
-    subset = df[df['query_name'] == query]
-    
-    subset = subset.sort_values(by='avg_ms')
-    fig, ax = plt.subplots(figsize=(10, 6))
-    
-    bars = ax.bar(subset['method'], subset['avg_ms'], color=['#348ABD', '#7A68A6', '#A60628', '#467821'][:len(subset)])
-    
-    ax.set_title(f'Performance Comparison: {query}', fontsize=16, fontweight='bold', pad=15)
-    ax.set_ylabel('Average Execution Time (ms)', fontsize=12)
-    ax.set_xlabel('Method', fontsize=12)
-    
-    for bar in bars:
-        height = bar.get_height()
-        ax.annotate(f'{height:.0f} ms',
-                    xy=(bar.get_x() + bar.get_width() / 2, height),
-                    xytext=(0, 3),  
-                    textcoords="offset points",
-                    ha='center', va='bottom', fontsize=11)
-    
-    plt.xticks(rotation=15)
-    plt.tight_layout()
-    filename_safe = query.replace('$', '').replace('.', '_').replace('[*]', '').replace('[', '_').replace(']', '')
-    
-    filename = f"plot{filename_safe}.png"
-    plt.savefig(filename, dpi=300)
-    print(f"Saved plot: {filename}")
-    
-    plt.close()
+    for query in queries:
+        # Filter data for specific query
+        subset = df[df['query_name'] == query]
+        
+        subset = subset.sort_values(by='avg_ms')
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        bars = ax.bar(subset['method'], subset['avg_ms'], color=['#348ABD', '#7A68A6', '#A60628', '#467821'][:len(subset)])
+        
+        ax.set_title(f'Performance Comparison: {query}', fontsize=16, fontweight='bold', pad=15)
+        ax.set_ylabel('Average Execution Time (ms)', fontsize=12)
+        ax.set_xlabel('Method', fontsize=12)
+        
+        for bar in bars:
+            height = bar.get_height()
+            ax.annotate(f'{height:.0f} ms',
+                        xy=(bar.get_x() + bar.get_width() / 2, height),
+                        xytext=(0, 3),  
+                        textcoords="offset points",
+                        ha='center', va='bottom', fontsize=11)
+        
+        plt.xticks(rotation=15)
+        plt.tight_layout()
+        filename_safe = query.replace('$', '').replace('.', '_').replace('[*]', '').replace('[', '_').replace(']', '')
+        
+        filename = f"plot{filename_safe}.png"
+        plt.savefig(filename, dpi=300)
+        print(f"Saved plot: {filename}")
+        
+        plt.close()
+
+
+if __name__ == "__main__":
+    create_plots(data=data_gin)
+

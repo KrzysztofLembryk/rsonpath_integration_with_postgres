@@ -36,19 +36,19 @@ In d3 dataset each json (row in our table) is around **1.7 kB**,
 ```
 
 ## $.authors[*].name
-![auth name](./plots/plot_authors_name.png) 
+![auth name](./plots/for_d3_and_generated/plot_authors_name.png) 
 
 ## $.s2fieldsofstudy[*].category
-![s2field](./plots/plot_s2fieldsofstudy_category.png) 
+![s2field](./plots/for_d3_and_generated/plot_s2fieldsofstudy_category.png) 
 
 ## $.externalids.DOI
-![ext DOI](./plots/plot_externalids_DOI.png) 
+![ext DOI](./plots/for_d3_and_generated/plot_externalids_DOI.png) 
 
 ## $.title
-![auth name](./plots/plot_title.png) 
+![auth name](./plots/for_d3_and_generated/plot_title.png) 
 
 ## $.year
-![auth name](./plots/plot_year.png) 
+![auth name](./plots/for_d3_and_generated/plot_year.png) 
 
 # our generated dataset 
 Each json is of size 1MB, so each row in postgres is around **395,987 kB** (because of compression)
@@ -113,17 +113,17 @@ Each json is of size 1MB, so each row in postgres is around **395,987 kB** (beca
 ```
 
 ## $.address1.city1
-![auth name](./plots/plot_address1_city1.png) 
+![auth name](./plots/for_d3_and_generated/plot_address1_city1.png) 
 
 
 ## $.email1
-![auth name](./plots/plot_email1.png) 
+![auth name](./plots/for_d3_and_generated/plot_email1.png) 
 
 ## $.hobby[*]
-![auth name](./plots/plot_hobby.png) 
+![auth name](./plots/for_d3_and_generated/plot_hobby.png) 
 
 ## $.nested1.nested2.countries[*]
-![auth name](./plots/plot_nested1_nested2_countries.png) 
+![auth name](./plots/for_d3_and_generated/plot_nested1_nested2_countries.png) 
 
 
 ## Explain analyze '$.email1'
