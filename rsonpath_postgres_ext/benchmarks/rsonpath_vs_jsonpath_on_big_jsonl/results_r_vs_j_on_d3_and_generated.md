@@ -1,5 +1,5 @@
 # d3 dataset results rsonpath vs jsonpath
-In d3 dataset each json (row in our table) is not huge, like 40~80MB
+In d3 dataset each json (row in our table) is around **1.7 kB**,
 
 ```
     ('scalar_title',          '$.title'),
@@ -49,7 +49,8 @@ In d3 dataset each json (row in our table) is not huge, like 40~80MB
 ## $.year
 ![auth name](./plots/plot_year.png) 
 
-# our generated dataset with each json of size 1MB
+# our generated dataset 
+Each json is of size 1MB, so each row in postgres is around **395,987 kB** (because of compression)
 
 ## json structure
 ```python

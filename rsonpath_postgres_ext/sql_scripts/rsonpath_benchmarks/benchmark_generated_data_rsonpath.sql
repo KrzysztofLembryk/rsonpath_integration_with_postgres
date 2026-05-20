@@ -46,9 +46,7 @@ CREATE UNLOGGED TABLE bench_json (
 COPY bench_json(data)
 FROM '/tmp/large.json';
 
--- 2) Precompute payload forms to reduce unrelated cast overhead during timing.
--- If you cast inside every timed query, you measure cast cost + query cost mixed together.
--- Precomputing once keeps benchmark focused on query execution itself.
+-- Precompute payload forms to reduce unrelated cast overhead during timing.
 DROP TABLE IF EXISTS bench_payload;
 CREATE TEMP TABLE bench_payload AS
 SELECT
@@ -110,6 +108,7 @@ BEGIN
              LATERAL rsonpath_ext_json(q.query_path, p.data::text);
 
         FOR i IN 1..runs LOOP
+            -- string ext
             t0 := clock_timestamp();
             SELECT count(*) INTO cnt
             FROM bench_json p,
@@ -119,6 +118,7 @@ BEGIN
             INSERT INTO bench_results(method, query_name, query_path, run_no, elapsed_ms, match_count, json_size_mb)
             VALUES ('rsonpath_ext_str', q.query_name, q.query_path, i, ms, cnt, js_size);
 
+            -- json ext
             t0 := clock_timestamp();
             SELECT count(*) INTO cnt
             FROM bench_json p,
@@ -127,21 +127,21 @@ BEGIN
 
             INSERT INTO bench_results(method, query_name, query_path, run_no, elapsed_ms, match_count, json_size_mb)
             VALUES ('rsonpath_ext_json', q.query_name, q.query_path, i, ms, cnt, js_size);
+
+            -- count ext
+            t0 := clock_timestamp();
+            SELECT sum(rsonpath_ext_count(q.query_path, p.data::text)) INTO cnt
+            FROM bench_json p;
+            ms := round((extract(epoch FROM (clock_timestamp() - t0)) * 1000.0)::numeric, 3);
+
+            INSERT INTO bench_results(method, query_name, query_path, run_no, elapsed_ms, match_count, json_size_mb)
+            VALUES ('rsonpath_ext_count', q.query_name, q.query_path, i, ms, cnt, js_size);
         END LOOP;
     END LOOP;
 END $$;
 
--- 5) Per-run detailed output.
--- SELECT
---     method,
---     query_name,
---     run_no,
---     elapsed_ms,
---     match_count
--- FROM bench_results
--- ORDER BY query_name, method, run_no;
 
--- 6) Aggregated summary.
+-- Aggregated summary.
 SELECT
     query_path AS query,
     method,

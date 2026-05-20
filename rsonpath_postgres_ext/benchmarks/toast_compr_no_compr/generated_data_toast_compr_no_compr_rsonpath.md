@@ -31,25 +31,6 @@ SIZE: 89.67 MB
  $.records[*].scores[*]    | r_json | 706.078                | 757.570 | +51.492
  $.records[*].scores[*]    | r_str  | 655.480                | 690.015 | +34.535
 
-
-
-SIZE: 89.67 MB
-           query           | method |  avg_ms  | diff_ms
----------------------------+--------+----------+---------
- $.records[*].address.city | r_json |  385.736 | +40.147
- $.records[*].address.city | r_str  |  363.977 | +34.670
- $.records[*].name         | r_json |  355.665 | +47.649
- $.records[*].name         | r_str  |  337.032 | +36.195
- $.records[*].scores[*]    | r_json |  757.570 | +51.492
- $.records[*].scores[*]    | r_str  |  690.015 | +34.535
-
-
-
-           query           | avg_time_ms 
----------------------------+-------------
- $.records[*].name         |   19607.921
- $.records[*].address.city |   19662.163
- $.records[*].scores[*]    |  534206.969
 ```
 
 # perf
@@ -66,7 +47,7 @@ SIZE: 89.67 MB
 +   27,11%  postgres  [.] palloc
 
 
-# konwersja do tekstu
+# conversion to text takes most of the time
 +   25,07%  postgres                 [.] ExecInterpExpr
 +   16,76%  postgres                 [.] text_to_cstring
 +    7,24%  postgres                 [.] cstring_to_text (inlined)

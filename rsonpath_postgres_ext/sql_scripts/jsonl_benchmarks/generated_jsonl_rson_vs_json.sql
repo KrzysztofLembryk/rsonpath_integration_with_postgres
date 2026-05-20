@@ -27,7 +27,7 @@ INSERT INTO bench_queries(query_name, query_path) VALUES
     ('scalar_email',            '$.email1'),
     ('scalar_address_city',     '$.address1.city1'),
     ('array_tags',              '$.tags1[*]'),
-    -- ('array_cities',            '$.cities[*]'),
+    ('array_cities',            '$.cities[*]'),
     ('nested_array_countries',  '$.nested1.nested2.countries[*]'),
     ('conditional_hobby',       '$.hobby[*]');
 
@@ -48,7 +48,7 @@ DECLARE
     t0   timestamptz;
     ms   numeric(20,3);
     cnt  bigint;
-    runs int := 1; -- Number of iterations per query
+    runs int := 1;
 BEGIN
     FOR q IN SELECT query_name, query_path FROM bench_queries ORDER BY query_name
     LOOP
@@ -84,6 +84,15 @@ BEGIN
             INSERT INTO bench_results VALUES
                 ('rsonpath_ext_json', q.query_name, q.query_path, i, ms, cnt);
 
+            -- jsonpath with cast
+            t0 := clock_timestamp();
+            SELECT count(*) INTO cnt
+            FROM data_1mb_jsons p,
+                 LATERAL jsonb_path_query(p.data::jsonb, q.query_path::jsonpath);
+            ms := round((extract(epoch FROM (clock_timestamp() - t0)) * 1000.0)::numeric, 3);
+            INSERT INTO bench_results VALUES
+                ('jsonpath_with_cast', q.query_name, q.query_path, i, ms, cnt);
+
             -- 4. native Postgres jsonpath
             t0 := clock_timestamp();
             SELECT count(*) INTO cnt
@@ -91,7 +100,7 @@ BEGIN
                  LATERAL jsonb_path_query(p.data, q.query_path::jsonpath);
             ms := round((extract(epoch FROM (clock_timestamp() - t0)) * 1000.0)::numeric, 3);
             INSERT INTO bench_results VALUES
-                ('jsonpath', q.query_name, q.query_path, i, ms, cnt);
+                ('jsonpath_no_cast', q.query_name, q.query_path, i, ms, cnt);
         END LOOP;
     END LOOP;
 END $$;

@@ -27,7 +27,7 @@ DECLARE
     total_time numeric;
     cnt bigint;
     js_size_mb numeric(20,3);
-    num_runs integer := 3;
+    num_runs integer := 5;
     ONE_MB numeric := 1024.0 * 1024.0;
 BEGIN
 

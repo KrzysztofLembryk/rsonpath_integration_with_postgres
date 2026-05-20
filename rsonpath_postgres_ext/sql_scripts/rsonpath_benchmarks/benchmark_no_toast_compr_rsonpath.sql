@@ -46,9 +46,7 @@ ALTER TABLE bench_json ALTER COLUMN data SET STORAGE EXTERNAL;
 COPY bench_json(data)
 FROM '/tmp/large.json';
 
--- 2) Precompute payload forms to reduce unrelated cast overhead during timing.
--- If you cast inside every timed query, you measure cast cost + query cost mixed together.
--- Precomputing once keeps benchmark focused on query execution itself.
+-- Precompute payload to reduce unrelated cast overhead during timing.
 DROP TABLE IF EXISTS bench_payload;
 CREATE TEMP TABLE bench_payload AS
 SELECT
