@@ -1,5 +1,15 @@
 -- We dont have value based filtering yet, only key based filtering, so here we have 
 -- big jsonl with around 10% jsons having hobby key
+-- RESULTS:
+--  query_path |          method          | match_count |  avg_ms   
+-- ------------+--------------------------+-------------+-----------
+--  $.hobby[*] | jsonpath                 |        3734 | 16732.731
+--  $.hobby[*] | rsonpath_ext_count       |        3734 | 45581.357
+
+--  $.hobby[*] | jsonpath_gin_filter_only |         932 | 12944.118
+--  $.hobby[*] | rsonpath_gin_filter_only |         932 |  8067.662
+--  $.hobby[*] | jsonpath_gin             |        3734 | 13912.647
+--  $.hobby[*] | rsonpath_ext_count_gin   |        3734 | 12682.805
 
 \set ON_ERROR_STOP on
 \timing on
@@ -85,7 +95,7 @@ BEGIN
                  LATERAL jsonb_path_query(p.data, q.query_path::jsonpath);
 
             ms := round((extract(epoch FROM (clock_timestamp() - t0)) * 1000.0)::numeric, 3);
-            INSERT INTO bench_results VALUES ('jsonpath_no_cast', q.query_name, q.query_path, i, ms, cnt);
+            INSERT INTO bench_results VALUES ('jsonpath', q.query_name, q.query_path, i, ms, cnt);
 
             ---------------------------------------------------------
             -- GIN FILTER ONLY
