@@ -125,6 +125,11 @@ Each json is of size 1MB, so each row in postgres is around **395,987 kB** (beca
 ## $.nested1.nested2.countries[*]
 ![auth name](./plots/for_d3_and_generated/plot_nested1_nested2_countries.png) 
 
+## $.cities[*]
+![auth name](./plots/for_d3_and_generated/plot_cities.png) 
+
+## $.tags[*]
+![auth name](./plots/for_d3_and_generated/plot_tags1.png) 
 
 ## Explain analyze '$.email1'
 - jsonpath:

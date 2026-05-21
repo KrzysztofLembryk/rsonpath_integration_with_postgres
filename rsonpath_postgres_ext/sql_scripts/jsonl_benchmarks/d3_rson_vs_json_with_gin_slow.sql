@@ -152,7 +152,7 @@ BEGIN
 
 
             ---------------------------------------------------------
-            -- GIN FILTER ONLY 
+            -- GIN FILTER ONLY - how many documents contain our path
             ---------------------------------------------------------
 
             -- rsonpath 
@@ -174,7 +174,7 @@ BEGIN
             INSERT INTO bench_results VALUES ('jsonpath_gin_filter_only', q.query_name, q.query_path, i, ms, cnt);
 
             ---------------------------------------------------------
-            -- GIN ACCELERATED EXTRACTION
+            -- GIN ACCELERATED EXTRACTION - how many times given path is in our documents
             ---------------------------------------------------------
             
             -- rsonpath 

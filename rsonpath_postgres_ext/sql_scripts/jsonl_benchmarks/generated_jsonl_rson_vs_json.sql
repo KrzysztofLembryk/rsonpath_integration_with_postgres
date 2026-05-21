@@ -1,7 +1,45 @@
+-- Results
+--            query_path           |       method       | match_count |   avg_ms   
+-- --------------------------------+--------------------+-------------+------------
+--  $.address1.city1               | jsonpath_with_cast |       10000 |  12079.653
+--  $.address1.city1               | jsonpath_no_cast   |       10000 |  12153.546
+--  $.address1.city1               | rsonpath_ext_count |       10000 |  43522.942
+--  $.address1.city1               | rsonpath_ext_str   |       10000 |  43632.577
+--  $.address1.city1               | rsonpath_ext_json  |       10000 |  43664.766
+--  $.cities[*]                    | rsonpath_ext_count |   300000000 |  45646.715
+--  $.cities[*]                    | rsonpath_ext_str   |   300000000 |  84958.857
+--  $.cities[*]                    | rsonpath_ext_json  |   300000000 |  97826.613
+--  $.cities[*]                    | jsonpath_with_cast |   300000000 | 391020.057
+--  $.cities[*]                    | jsonpath_no_cast   |   300000000 | 402916.620
+--  $.email1                       | jsonpath_with_cast |       10000 |  12079.480
+--  $.email1                       | jsonpath_no_cast   |       10000 |  12101.644
+--  $.email1                       | rsonpath_ext_count |       10000 |  43475.215
+--  $.email1                       | rsonpath_ext_str   |       10000 |  43637.784
+--  $.email1                       | rsonpath_ext_json  |       10000 |  43699.923
+--  $.hobby[*]                     | jsonpath_with_cast |        3734 |  12068.948
+--  $.hobby[*]                     | jsonpath_no_cast   |        3734 |  12141.969
+--  $.hobby[*]                     | rsonpath_ext_count |        3734 |  43563.827
+--  $.hobby[*]                     | rsonpath_ext_json  |        3734 |  43637.019
+--  $.hobby[*]                     | rsonpath_ext_str   |        3734 |  43714.196
+--  $.nested1.nested2.countries[*] | rsonpath_ext_count |   300000000 |  45408.272
+--  $.nested1.nested2.countries[*] | rsonpath_ext_str   |   300000000 |  87710.235
+--  $.nested1.nested2.countries[*] | rsonpath_ext_json  |   300000000 | 101249.476
+--  $.nested1.nested2.countries[*] | jsonpath_no_cast   |   300000000 | 390982.474
+--  $.nested1.nested2.countries[*] | jsonpath_with_cast |   300000000 | 391686.303
+--  $.tags1[*]                     | rsonpath_ext_count |   150000000 |  44424.402
+--  $.tags1[*]                     | rsonpath_ext_str   |   150000000 |  64592.075
+--  $.tags1[*]                     | rsonpath_ext_json  |   150000000 |  70752.957
+--  $.tags1[*]                     | jsonpath_with_cast |   150000000 | 106523.196
+--  $.tags1[*]                     | jsonpath_no_cast   |   150000000 | 106855.967
+
+
 \set ON_ERROR_STOP on
 \timing on
 
 CREATE EXTENSION IF NOT EXISTS rsonpath_postgres_ext;
+
+DROP INDEX IF EXISTS data_1mb_jsonb_rsonpath_gin_idx;
+DROP INDEX IF EXISTS data_1mb_jsonb_jsonpath_gin_idx;
 
 SELECT count(*) AS rows FROM data_1mb_jsons;
 
