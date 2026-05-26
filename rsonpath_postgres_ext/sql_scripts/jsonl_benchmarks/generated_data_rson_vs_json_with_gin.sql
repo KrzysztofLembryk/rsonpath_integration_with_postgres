@@ -1,6 +1,6 @@
 -- We dont have value based filtering yet, only key based filtering, so here we have 
 -- big jsonl with around 10% jsons having hobby key
--- RESULTS:
+-- RESULTS (1 run):
 --  query_path |          method          | match_count |  avg_ms   
 -- ------------+--------------------------+-------------+-----------
 --  $.hobby[*] | jsonpath                 |        3734 | 16732.731
@@ -11,10 +11,25 @@
 --  $.hobby[*] | jsonpath_gin             |        3734 | 13912.647
 --  $.hobby[*] | rsonpath_ext_count_gin   |        3734 | 12682.805
 
+-- RESULTS (5 runs and average):
+-- Time: 600445,815 ms (10:00,446)
+--  query_path |          method          | match_count |  avg_ms   
+-- ------------+--------------------------+-------------+-----------
+--  $.hobby[*] | jsonpath                 |        3734 | 15441.249
+--  $.hobby[*] | rsonpath_ext_count       |        3734 | 48500.311
+--
+--  $.hobby[*] | jsonpath_gin_filter_only |         932 | 12360.038
+--  $.hobby[*] | rsonpath_gin_filter_only |         932 |  8117.575
+--  $.hobby[*] | jsonpath_gin             |        3734 | 13436.985
+--  $.hobby[*] | rsonpath_ext_count_gin   |        3734 | 12349.180
+
 \set ON_ERROR_STOP on
 \timing on
 
 CREATE EXTENSION IF NOT EXISTS rsonpath_postgres_ext;
+
+DROP INDEX IF EXISTS data_1mb_jsonb_rsonpath_gin_idx;
+DROP INDEX IF EXISTS data_1mb_jsonb_jsonpath_gin_idx;
 
 SELECT count(*) AS rows FROM data_1mb_jsons;
 
@@ -63,7 +78,7 @@ DECLARE
     t0   timestamptz;
     ms   numeric(20,3);
     cnt  bigint;
-    runs int := 1; 
+    runs int := 5; 
 BEGIN
     FOR q IN SELECT query_name, query_path FROM bench_queries ORDER BY query_name
     LOOP

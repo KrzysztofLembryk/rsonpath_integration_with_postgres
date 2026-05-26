@@ -1,36 +1,65 @@
 -- REMEMBER to run in !!! RELEASE !!!
--- Time: 461896,559 ms (07:41,897) for 900MB
---            query           |      method       | json_size_mb |  avg_ms  
--- ---------------------------+-------------------+--------------+----------
---  $.records[*].address.city | rsonpath_ext_json |      908.275 | 4611.137
---  $.records[*].address.city | rsonpath_ext_str  |      908.275 | 4376.405
---  $.records[*].name         | rsonpath_ext_json |      908.275 | 4321.123
---  $.records[*].name         | rsonpath_ext_str  |      908.275 | 4013.329
---  $.records[*].scores[*]    | rsonpath_ext_json |      908.275 | 9513.402
---  $.records[*].scores[*]    | rsonpath_ext_str  |      908.275 | 8979.106
 
+-- avg Results for 5 runs
+--            query           |       method       | json_size_mb |  avg_ms  
+-- ---------------------------+--------------------+--------------+----------
+--  $.records[*].address.city | rsonpath_ext_count |      908.275 | 2425.120
+--  $.records[*].address.city | rsonpath_ext_json  |      908.275 | 3390.662
+--  $.records[*].address.city | rsonpath_ext_str   |      908.275 | 3225.259
+--  $.records[*].name         | rsonpath_ext_count |      908.275 | 2052.123
+--  $.records[*].name         | rsonpath_ext_json  |      908.275 | 3075.771
+--  $.records[*].name         | rsonpath_ext_str   |      908.275 | 2896.216
+--  $.records[*].scores[*]    | rsonpath_ext_count |      908.275 | 2360.908
+--  $.records[*].scores[*]    | rsonpath_ext_json  |      908.275 | 5893.704
+--  $.records[*].scores[*]    | rsonpath_ext_str   |      908.275 | 5449.010
 
--- Time: 119741,553 ms (01:59,742)
---            query           |      method       | json_size_mb |  avg_ms   | ext_ms
--- ---------------------------+-------------------+--------------+-------------------
---  $.records[*].address.city | rsonpath_ext_json |      224.669 | 10901.796 | 8727 
---  $.records[*].address.city | rsonpath_ext_str  |      224.669 | 10183.218 | 8055 
---  $.records[*].name         | rsonpath_ext_json |      224.669 |  7018.159 | 5286 
---  $.records[*].name         | rsonpath_ext_str  |      224.669 |  6880.815 | 5151
---  $.records[*].scores[*]    | rsonpath_ext_json |      224.669 | 12389.811 | 8464 
---  $.records[*].scores[*]    | rsonpath_ext_str  |      224.669 | 11997.557 | 8859 
+--            query           |       method       | json_size_mb | avg_ms  
+-- ---------------------------+--------------------+--------------+---------
+--  $.records[*].address.city | rsonpath_ext_count |       89.674 | 136.011
+--  $.records[*].address.city | rsonpath_ext_json  |       89.674 | 225.883
+--  $.records[*].address.city | rsonpath_ext_str   |       89.674 | 211.070
+--  $.records[*].name         | rsonpath_ext_count |       89.674 | 101.302
+--  $.records[*].name         | rsonpath_ext_json  |       89.674 | 200.556
+--  $.records[*].name         | rsonpath_ext_str   |       89.674 | 182.776
+--  $.records[*].scores[*]    | rsonpath_ext_count |       89.674 | 141.752
+--  $.records[*].scores[*]    | rsonpath_ext_json  |       89.674 | 478.717
+--  $.records[*].scores[*]    | rsonpath_ext_str   |       89.674 | 434.614
 
+--           query           |       method       | json_size_mb | avg_ms  
+-- ---------------------------+--------------------+--------------+---------
+--  $.records[*].address.city | rsonpath_ext_count |       44.682 |  67.816
+--  $.records[*].address.city | rsonpath_ext_json  |       44.682 | 113.181
+--  $.records[*].address.city | rsonpath_ext_str   |       44.682 | 105.944
+--  $.records[*].name         | rsonpath_ext_count |       44.682 |  50.510
+--  $.records[*].name         | rsonpath_ext_json  |       44.682 |  99.796
+--  $.records[*].name         | rsonpath_ext_str   |       44.682 |  90.945
+--  $.records[*].scores[*]    | rsonpath_ext_count |       44.682 |  71.151
+--  $.records[*].scores[*]    | rsonpath_ext_json  |       44.682 | 241.279
+--  $.records[*].scores[*]    | rsonpath_ext_str   |       44.682 | 218.549
 
---            query           |      method       | json_size_mb | avg_ms  
--------------------------+-------------------+--------------+---------
---  $.records[*].address.city | rsonpath_ext_json |       89.674 | 385.736
---  $.records[*].address.city | rsonpath_ext_str  |       89.674 | 363.977
---  $.records[*].name         | rsonpath_ext_json |       89.674 | 355.665
---  $.records[*].name         | rsonpath_ext_str  |       89.674 | 337.032
---  $.records[*].scores[*]    | rsonpath_ext_json |       89.674 | 757.570
---  $.records[*].scores[*]    | rsonpath_ext_str  |       89.674 | 690.015
+--            query           |       method       | json_size_mb | avg_ms 
+-- ---------------------------+--------------------+--------------+--------
+--  $.records[*].address.city | rsonpath_ext_count |       15.520 | 24.986
+--  $.records[*].address.city | rsonpath_ext_json  |       15.520 | 41.022
+--  $.records[*].address.city | rsonpath_ext_str   |       15.520 | 38.304
+--  $.records[*].name         | rsonpath_ext_count |       15.520 | 18.561
+--  $.records[*].name         | rsonpath_ext_json  |       15.520 | 35.349
+--  $.records[*].name         | rsonpath_ext_str   |       15.520 | 32.369
+--  $.records[*].scores[*]    | rsonpath_ext_count |       15.520 | 25.613
+--  $.records[*].scores[*]    | rsonpath_ext_json  |       15.520 | 85.870
+--  $.records[*].scores[*]    | rsonpath_ext_str   |       15.520 | 77.552
 
-
+--            query           |       method       | json_size_mb | avg_ms 
+-- ---------------------------+--------------------+--------------+--------
+--  $.records[*].address.city | rsonpath_ext_count |        7.745 | 12.478
+--  $.records[*].address.city | rsonpath_ext_json  |        7.745 | 18.877
+--  $.records[*].address.city | rsonpath_ext_str   |        7.745 | 17.848
+--  $.records[*].name         | rsonpath_ext_count |        7.745 |  9.324
+--  $.records[*].name         | rsonpath_ext_json  |        7.745 | 15.555
+--  $.records[*].name         | rsonpath_ext_str   |        7.745 | 14.209
+--  $.records[*].scores[*]    | rsonpath_ext_count |        7.745 | 12.374
+--  $.records[*].scores[*]    | rsonpath_ext_json  |        7.745 | 42.562
+--  $.records[*].scores[*]    | rsonpath_ext_str   |        7.745 | 38.629
 
 \set ON_ERROR_STOP on
 \timing on
@@ -86,7 +115,7 @@ DECLARE
     ms        numeric(20,3);
     cnt       bigint;
     js_size   numeric(20,3);
-    runs      int := 2;
+    runs      int := 5;
     ONE_MB numeric := 1024.0 * 1024.0;
 BEGIN
     SELECT round((sum(octet_length(data::text)) / ONE_MB)::numeric, 3) INTO js_size FROM bench_json;

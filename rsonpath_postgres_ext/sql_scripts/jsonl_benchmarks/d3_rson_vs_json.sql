@@ -22,6 +22,22 @@
 --  scalar_year          | rsonpath_ext_str   |     5944139 | 44962.596 | 44962.596 | 44962.596
 --  scalar_year          | rsonpath_ext_json  |     5944139 | 45752.006 | 45752.006 | 45752.006
 
+-- avg Results for 5 runs:
+
+--      query_name                |       method       | match_count |  avg_ms   
+-- -------------------------------+--------------------+-------------+--------------
+--  $.authors[*]                  | jsonpath           |    18784025 | 32125.603
+--  $.authors[*]                  | rsonpath_ext_count |    18784025 | 37811.934
+--  $.authors[*]                  | rsonpath_ext_str   |    18784025 | 46521.180
+--  $.authors[*]                  | rsonpath_ext_json  |    18784025 | 50603.718
+--  $.s2fieldsofstudy[*].category | jsonpath           |    14247701 | 33984.821
+--  $.s2fieldsofstudy[*].category | rsonpath_ext_count |    14247701 | 40787.870
+--  $.s2fieldsofstudy[*].category | rsonpath_ext_str   |    14247701 | 47908.566
+--  $.s2fieldsofstudy[*].category | rsonpath_ext_json  |    14247701 | 48723.853
+--  $.title                       | jsonpath           |     5944139 | 32076.858
+--  $.title                       | rsonpath_ext_count |     5944139 | 37275.357
+--  $.title                       | rsonpath_ext_str   |     5944139 | 42781.894
+--  $.title                       | rsonpath_ext_json  |     5944139 | 43471.645
 
 \set ON_ERROR_STOP on
 \timing on
@@ -49,9 +65,9 @@ CREATE TEMP TABLE bench_queries (
 
 INSERT INTO bench_queries(query_name, query_path) VALUES
     ('scalar_title',          '$.title'),
-    ('scalar_year',           '$.year'),
-    ('nested_obj_doi',        '$.externalids.DOI'),
-    ('array_author_names',    '$.authors[*].name'),
+    -- ('scalar_year',           '$.year'),
+    -- ('nested_obj_doi',        '$.externalids.DOI'),
+    -- ('array_author_names',    '$.authors[*].name'),
     ('array_author_all',      '$.authors[*]'),
     ('array_fos_categories',  '$.s2fieldsofstudy[*].category');
 
@@ -72,7 +88,7 @@ DECLARE
     t0   timestamptz;
     ms   numeric(20,3);
     cnt  bigint;
-    runs int := 1; 
+    runs int := 5; 
 BEGIN
     FOR q IN SELECT query_name, query_path FROM bench_queries ORDER BY query_name
     LOOP
@@ -109,13 +125,13 @@ BEGIN
                 ('rsonpath_ext_json', q.query_name, q.query_path, i, ms, cnt);
 
             -- jsonpath with cast
-            t0 := clock_timestamp();
-            SELECT count(*) INTO cnt
-            FROM d3_papers p,
-                 LATERAL jsonb_path_query(p.data::jsonb, q.query_path::jsonpath);
-            ms := round((extract(epoch FROM (clock_timestamp() - t0)) * 1000.0)::numeric, 3);
-            INSERT INTO bench_results VALUES
-                ('jsonpath_with_cast', q.query_name, q.query_path, i, ms, cnt);
+            -- t0 := clock_timestamp();
+            -- SELECT count(*) INTO cnt
+            -- FROM d3_papers p,
+            --      LATERAL jsonb_path_query(p.data::jsonb, q.query_path::jsonpath);
+            -- ms := round((extract(epoch FROM (clock_timestamp() - t0)) * 1000.0)::numeric, 3);
+            -- INSERT INTO bench_results VALUES
+            --     ('jsonpath_with_cast', q.query_name, q.query_path, i, ms, cnt);
 
             --  jsonpath without cast
             t0 := clock_timestamp();
@@ -124,7 +140,7 @@ BEGIN
                  LATERAL jsonb_path_query(p.data, q.query_path::jsonpath);
             ms := round((extract(epoch FROM (clock_timestamp() - t0)) * 1000.0)::numeric, 3);
             INSERT INTO bench_results VALUES
-                ('jsonpath_no_cast', q.query_name, q.query_path, i, ms, cnt);
+                ('jsonpath', q.query_name, q.query_path, i, ms, cnt);
 
         END LOOP;
     END LOOP;
@@ -135,9 +151,9 @@ SELECT
     query_name, 
     method, 
     match_count, 
-    round(avg(elapsed_ms), 3) AS avg_ms,
-    round(min(elapsed_ms), 3) AS min_ms,
-    round(max(elapsed_ms), 3) AS max_ms
+    round(avg(elapsed_ms), 3) AS avg_ms
+    -- round(min(elapsed_ms), 3) AS min_ms,
+    -- round(max(elapsed_ms), 3) AS max_ms
 FROM bench_results
 GROUP BY query_name, method, match_count
 ORDER BY query_name, avg_ms;

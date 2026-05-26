@@ -16,6 +16,9 @@ SEED = 42
 Faker.seed(SEED)
 fake = Faker()
 
+SIZE_8_MB = 350_00
+SIZE_16_MB = 700_00
+SIZE_45_MB = 200_000
 SIZE_90_MB = 400_000
 SIZE_180_MB = 800_000
 SIZE_225_MB = 1_000_000
@@ -23,7 +26,7 @@ SIZE_450_MB = 2_000_000
 SIZE_900_MB = 4_000_000
 SIZE_2_GB = 2 * SIZE_900_MB
 
-NUM_RECORDS = 10_000
+NUM_RECORDS = SIZE_8_MB
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_FILE = os.path.join(f"{OUTPUT_DIR}/generated_data", "large.json")
 OUTPUT_FILE_JSONL = os.path.join(f"{OUTPUT_DIR}/generated_data", "large.jsonl")
@@ -179,7 +182,7 @@ def generate_json():
     print(f"Generated {OUTPUT_FILE} ({len(s)} bytes, {size_mb:.1f} MB)")
 
 def main():
-    # generate_json()
+    generate_json()
     # generate_jsonl()
     # generate_jsonl_with_1MB_jsons_per_row()
     return
