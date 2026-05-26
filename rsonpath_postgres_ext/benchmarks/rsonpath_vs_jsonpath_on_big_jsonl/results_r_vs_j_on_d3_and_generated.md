@@ -1,5 +1,6 @@
+13.05.2026
 # d3 dataset results rsonpath vs jsonpath
-In d3 dataset each json (row in our table) is not huge, like 40~80MB
+In d3 dataset each json (row in our table) is around **1.7 kB**,
 
 ```
     ('scalar_title',          '$.title'),
@@ -35,21 +36,22 @@ In d3 dataset each json (row in our table) is not huge, like 40~80MB
 ```
 
 ## $.authors[*].name
-![auth name](./plots/plot_authors_name.png) 
+![auth name](./plots/for_d3_and_generated/plot_authors_name.png) 
 
 ## $.s2fieldsofstudy[*].category
-![s2field](./plots/plot_s2fieldsofstudy_category.png) 
+![s2field](./plots/for_d3_and_generated/plot_s2fieldsofstudy_category.png) 
 
 ## $.externalids.DOI
-![ext DOI](./plots/plot_externalids_DOI.png) 
+![ext DOI](./plots/for_d3_and_generated/plot_externalids_DOI.png) 
 
 ## $.title
-![auth name](./plots/plot_title.png) 
+![auth name](./plots/for_d3_and_generated/plot_title.png) 
 
 ## $.year
-![auth name](./plots/plot_year.png) 
+![auth name](./plots/for_d3_and_generated/plot_year.png) 
 
-# our generated dataset with each json of size 1MB
+# our generated dataset 
+Each json is of size 1MB, so each row in postgres is around **395,987 kB** (because of compression)
 
 ## json structure
 ```python
@@ -92,37 +94,57 @@ In d3 dataset each json (row in our table) is not huge, like 40~80MB
 ```
            query_path           |       method       | match_count |   avg_ms   
 --------------------------------+--------------------+-------------+------------
- $.address1.city1               | jsonpath           |       10000 |  16681.997
- $.address1.city1               | rsonpath_ext_json  |       10000 |  43762.908
- $.address1.city1               | rsonpath_ext_str   |       10000 |  43764.669
- $.address1.city1               | rsonpath_ext_count |       10000 |  44545.557
- $.email1                       | jsonpath           |       10000 |  16913.768
- $.email1                       | rsonpath_ext_json  |       10000 |  43725.370
- $.email1                       | rsonpath_ext_count |       10000 |  43934.154
- $.email1                       | rsonpath_ext_str   |       10000 |  43998.674
- $.hobby[*]                     | jsonpath           |        3734 |  14942.930
- $.hobby[*]                     | rsonpath_ext_str   |        3734 |  45473.538
- $.hobby[*]                     | rsonpath_ext_count |        3734 |  45521.427
- $.hobby[*]                     | rsonpath_ext_json  |        3734 |  47586.063
- $.nested1.nested2.countries[*] | rsonpath_ext_count |   300000000 |  50966.633
- $.nested1.nested2.countries[*] | rsonpath_ext_str   |   300000000 |  96533.801
- $.nested1.nested2.countries[*] | rsonpath_ext_json  |   300000000 | 102454.666
- $.nested1.nested2.countries[*] | jsonpath           |   300000000 | 421832.793
+ $.address1.city1               | jsonpath_with_cast |       10000 |  12079.653
+ $.address1.city1               | jsonpath_no_cast   |       10000 |  12153.546
+ $.address1.city1               | rsonpath_ext_count |       10000 |  43522.942
+ $.address1.city1               | rsonpath_ext_str   |       10000 |  43632.577
+ $.address1.city1               | rsonpath_ext_json  |       10000 |  43664.766
+ $.cities[*]                    | rsonpath_ext_count |   300000000 |  45646.715
+ $.cities[*]                    | rsonpath_ext_str   |   300000000 |  84958.857
+ $.cities[*]                    | rsonpath_ext_json  |   300000000 |  97826.613
+ $.cities[*]                    | jsonpath_with_cast |   300000000 | 391020.057
+ $.cities[*]                    | jsonpath_no_cast   |   300000000 | 402916.620
+ $.email1                       | jsonpath_with_cast |       10000 |  12079.480
+ $.email1                       | jsonpath_no_cast   |       10000 |  12101.644
+ $.email1                       | rsonpath_ext_count |       10000 |  43475.215
+ $.email1                       | rsonpath_ext_str   |       10000 |  43637.784
+ $.email1                       | rsonpath_ext_json  |       10000 |  43699.923
+ $.hobby[*]                     | jsonpath_with_cast |        3734 |  12068.948
+ $.hobby[*]                     | jsonpath_no_cast   |        3734 |  12141.969
+ $.hobby[*]                     | rsonpath_ext_count |        3734 |  43563.827
+ $.hobby[*]                     | rsonpath_ext_json  |        3734 |  43637.019
+ $.hobby[*]                     | rsonpath_ext_str   |        3734 |  43714.196
+ $.nested1.nested2.countries[*] | rsonpath_ext_count |   300000000 |  45408.272
+ $.nested1.nested2.countries[*] | rsonpath_ext_str   |   300000000 |  87710.235
+ $.nested1.nested2.countries[*] | rsonpath_ext_json  |   300000000 | 101249.476
+ $.nested1.nested2.countries[*] | jsonpath_no_cast   |   300000000 | 390982.474
+ $.nested1.nested2.countries[*] | jsonpath_with_cast |   300000000 | 391686.303
+ $.tags1[*]                     | rsonpath_ext_count |   150000000 |  44424.402
+ $.tags1[*]                     | rsonpath_ext_str   |   150000000 |  64592.075
+ $.tags1[*]                     | rsonpath_ext_json  |   150000000 |  70752.957
+ $.tags1[*]                     | jsonpath_with_cast |   150000000 | 106523.196
+ $.tags1[*]                     | jsonpath_no_cast   |   150000000 | 106855.967
+
 ```
 
 ## $.address1.city1
-![auth name](./plots/plot_address1_city1.png) 
+![auth name](./plots/for_d3_and_generated/plot_address1_city1.png) 
 
 
 ## $.email1
-![auth name](./plots/plot_email1.png) 
+![auth name](./plots/for_d3_and_generated/plot_email1.png) 
 
 ## $.hobby[*]
-![auth name](./plots/plot_hobby.png) 
+![auth name](./plots/for_d3_and_generated/plot_hobby.png) 
 
 ## $.nested1.nested2.countries[*]
-![auth name](./plots/plot_nested1_nested2_countries.png) 
+![auth name](./plots/for_d3_and_generated/plot_nested1_nested2_countries.png) 
 
+## $.cities[*]
+![auth name](./plots/for_d3_and_generated/plot_cities.png) 
+
+## $.tags[*]
+![auth name](./plots/for_d3_and_generated/plot_tags1.png) 
 
 ## Explain analyze '$.email1'
 - jsonpath:

@@ -148,74 +148,10 @@ fn check_if_subjson_exists(json_str: &str, query: &str) -> bool
 }
 
 #[pg_extern(immutable, parallel_safe, strict)] 
-#[opname(@@)] // operator symbol in SQL
+#[opname(@@)] 
 fn rsonpath_contains(json_str: &str,query: &str) -> bool {
-    // We pass whole json from row, then we check if at there is at least one sub-json 
-    // that satisfies query. 
-    // We Return true if there is.
-    // Currently we would need to use count to accomplish this.
-    // But to make it more optimal, we would need a function that stops once it finds
-    // first match
     return check_if_subjson_exists(json_str, query);
 }
-
-// GIN INDEX for rsonpath
-
-use serde_json::Value;
-
-fn get_all_paths(value: &Value, current_path: String, paths: &mut Vec<String>) {
-    match value {
-        Value::Object(map) => {
-            for (key, val) in map {
-                let next_path = if current_path.is_empty() {
-                    format!("$.{}", key)
-                } else {
-                    format!("{}.{}", current_path, key)
-                };
-                paths.push(next_path.clone());
-                get_all_paths(val, next_path, paths);
-            }
-        }
-        Value::Array(arr) => {
-            for (index, val) in arr.iter().enumerate() {
-                let next_path = format!("{}[{}]", current_path, index);
-                paths.push(next_path.clone());
-                get_all_paths(val, next_path, paths);
-            }
-        }
-        _ => {} // Primitive values (String, Number, Bool, Null) - paths already added
-    }
-}
-
-#[pg_extern(immutable, parallel_safe)]
-fn rsonpath_gin_extract_keys(json_str: &str) -> Vec<String> {
-    
-    let json_value: Value = serde_json::from_str(json_str).unwrap();
-    let mut all_paths = Vec::new();
-
-    get_all_paths(&json_value, "$".to_string(), &mut all_paths);
-
-    //  GIN indexes prefer unique keys per document
-    all_paths.sort();
-    all_paths.dedup();
-    return all_paths;
-}
-
-// Takes path query string, returns the keys you want to look up in the GIN index.
-// i.e. '$.person.name', we return ['$.person.name']
-// #[pg_extern(immutable, parallel_safe)]
-// fn rsonpath_gin_extract_query(
-//     query: &str,
-//     _internal_strategy: i16, 
-//     _pmatch: i16,
-//     _extra_data: pg_sys::Pointer,
-//     _null_flags: pg_sys::Pointer,
-//     _search_mode: pg_sys::Pointer,
-// ) -> Vec<String> {
-//     vec![query.to_string()]
-// }
-
-// CREATE INDEX my_json_gin_idx ON json_table USING GIN (rsonpath_gin_extract_keys(json::text));
 
 
 #[cfg(any(test, feature = "pg_test"))]
@@ -238,10 +174,10 @@ mod tests {
         "rsonpath_ext_count",
         // "jsonpath",
         ];
-    const SMALL_JSON: &str = include_str!("../tests/testdata/small.json");
-    const MEDIUM_JSON: &str = include_str!("../tests/testdata/medium.json");
+    const SMALL_JSON: &str = include_str!("../testdata/generated_data/small.json");
+    const MEDIUM_JSON: &str = include_str!("../testdata/generated_data/medium.json");
     const LARGE_JSONS: &'static [&'static str] = &[
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata/large.json",), 
+        concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/generated_data/large.json",), 
         ];
     
 
@@ -954,36 +890,6 @@ mod tests {
         return large_jsons;
     }
 
-
-    // #[pg_test]
-    // fn test_performance_med_small() 
-    // {
-    //     let mut report = String::new();
-    //     let timestamp = std::time::SystemTime::now()
-    //         .duration_since(std::time::UNIX_EPOCH)
-    //         .unwrap()
-    //         .as_secs();
-    //     writeln!(report, "# perf results (epoch: {})", timestamp).unwrap();
-    //     writeln!(report, "{:<35} {:>12} {:>10} {:>12}",
-    //         "Test", "JSON bytes", "Iters", "Avg (ms)").unwrap();
-    //     writeln!(report, "{}", "-".repeat(73)).unwrap();
-
-    //     for ext_name in EXTENSIONS
-    //     {
-    //         for case in TEST_CASES {
-    //             let sql = build_sql(*ext_name, case.query, case.json);
-    //             let json_bytes = case.json.len();
-    //             let iters = 100;
-    //             let avg_ms = bench(&sql, 5, iters);
-    //             writeln!(report, "{:<35} {:>12} {:>10} {:>12.4}",
-    //                 case.name, json_bytes, iters, avg_ms).unwrap();
-    //         }
-    //     }
-
-    //     std::fs::write(PERF_RESULTS_PATH, &report).unwrap_or_else(|e| {
-    //         panic!("Failed to write perf results to {}: {}", PERF_RESULTS_PATH, e)
-    //     });
-    // }
 }
 
 #[cfg(test)]

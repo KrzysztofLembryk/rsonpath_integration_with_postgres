@@ -10,9 +10,11 @@ Cargo.lock
 **/tests/pg_regress/regression.out
 **/tests/testdata/large.json
 **/tests/testdata/*large*.json
-**/tests/testdata/large.jsonl
+**/tests/testdata/*large*.jsonl
 **/tests/testdata/d3/
 **/results/*
 !**/results/.gitkeep
 **/FlameGraph
 perf.data
+*large*.json*
+**/d3/**

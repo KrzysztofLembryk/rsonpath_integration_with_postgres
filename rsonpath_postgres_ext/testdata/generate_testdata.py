@@ -25,8 +25,8 @@ SIZE_2_GB = 2 * SIZE_900_MB
 
 NUM_RECORDS = 10_000
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_FILE = os.path.join(OUTPUT_DIR, "large.json")
-OUTPUT_FILE_JSONL = os.path.join(OUTPUT_DIR, "large.jsonl")
+OUTPUT_FILE = os.path.join(f"{OUTPUT_DIR}/generated_data", "large.json")
+OUTPUT_FILE_JSONL = os.path.join(f"{OUTPUT_DIR}/generated_data", "large.jsonl")
 
 
 HOBBIES = ["reading", "cycling", "cooking", "gaming", "hiking", "swimming", "painting", "coding", "traveling", "photography"]
@@ -80,7 +80,7 @@ def generate_jsonl():
     size_mb = bytes_written / 1024 / 1024
     print(f"Generated JSONL {OUTPUT_FILE_JSONL} ({bytes_written} bytes, {size_mb:.1f} MB)")
 
-def generate_jsonl_2():
+def generate_jsonl_with_1MB_jsons_per_row():
     """
     Generates a JSONL file where each line is a separate JSON object.
     1 in 10 records will have a "hobby" key with a list of hobbies,
@@ -179,7 +179,10 @@ def generate_json():
     print(f"Generated {OUTPUT_FILE} ({len(s)} bytes, {size_mb:.1f} MB)")
 
 def main():
-    generate_jsonl_2()
+    # generate_json()
+    # generate_jsonl()
+    # generate_jsonl_with_1MB_jsons_per_row()
+    return
 
 if __name__ == "__main__":
     main()
