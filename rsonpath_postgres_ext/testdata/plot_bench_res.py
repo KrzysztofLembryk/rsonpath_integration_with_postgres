@@ -145,10 +145,13 @@ def create_combined_plots(datasets, output_filename="combined_plots.png"):
                 if method not in method_patches:
                     method_patches[method] = bar
 
-            ax.set_yscale('log')
+            # ax.set_yscale('log')
+            ax.set_yscale('linear')
+            ax.margins(y=0.1) 
+            ax.set_ylim(bottom=0)
 
-            ax.set_title(f'{query} on {json_size} JSON', fontsize=14, fontweight='bold', pad=15)
-            ax.set_ylabel('Average time (ms) ', fontsize=11)
+            ax.set_title(f'{query} on {json_size} JSON', fontsize=18, fontweight='bold', pad=15)
+            ax.set_ylabel('Average time (ms) ', fontsize=16)
             
             for bar in bars:
                 height = bar.get_height()
@@ -156,7 +159,7 @@ def create_combined_plots(datasets, output_filename="combined_plots.png"):
                             xy=(bar.get_x() + bar.get_width() / 2, height),
                             xytext=(0, 5),
                             textcoords="offset points",
-                            ha='center', va='bottom', fontsize=10)
+                            ha='center', va='bottom', fontsize=16)
             
             # Remove the X-axis names/ticks completely
             ax.set_xticks([])
@@ -172,7 +175,7 @@ def create_combined_plots(datasets, output_filename="combined_plots.png"):
     if method_patches:
         labels = list(method_patches.keys())
         handles = list(method_patches.values())
-        fig.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, 0.98), ncol=len(labels), fontsize=12)
+        fig.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, 0.98), ncol=len(labels), fontsize=18)
         
         # Adjust layout so title/legend doesn't overlap the subplots
         plt.tight_layout(rect=[0, 0, 1, 0.93])
@@ -194,13 +197,12 @@ def create_combined_plots_2(datasets, output_filename="combined_plots.png"):
         
     # Calculate grid size (at least 2 columns if more than 1 plot, otherwise 1 column)
     ncols = min(2, total_plots)
-    nrows = (total_plots + ncols - 1) // ncols  # ceiling division
+    nrows = (total_plots + ncols - 1) // ncols 
     
-    # Handle single plot edge case
     if nrows == 0:
         return
         
-    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(16, 6 * nrows))
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(16, 6 * nrows), sharey=True)
     
     # Normalize axes to always be a flat list even if it's 1x1
     if nrows == 1 and ncols == 1:
@@ -250,10 +252,13 @@ def create_combined_plots_2(datasets, output_filename="combined_plots.png"):
                     method_patches[method] = bar
 
             # We use a linear scale if you want, but you mentioned log scale earlier.
-            ax.set_yscale('log')
+            # ax.set_yscale('log')
+            ax.set_yscale('linear')
+            ax.margins(y=0.1) 
+            ax.set_ylim(bottom=0)
 
-            ax.set_title(f'{query}', fontsize=14, fontweight='bold', pad=15)
-            ax.set_ylabel('Average time (ms)', fontsize=11)
+            ax.set_title(f'{query}', fontsize=18, fontweight='bold', pad=15)
+            ax.set_ylabel('Average time (ms)', fontsize=17)
             
             for bar in bars:
                 height = bar.get_height()
@@ -261,7 +266,7 @@ def create_combined_plots_2(datasets, output_filename="combined_plots.png"):
                             xy=(bar.get_x() + bar.get_width() / 2, height),
                             xytext=(0, 5),
                             textcoords="offset points",
-                            ha='center', va='bottom', fontsize=10)
+                            ha='center', va='bottom', fontsize=18)
             
             ax.set_xticks([])
             ax.set_xlabel('')
@@ -276,10 +281,13 @@ def create_combined_plots_2(datasets, output_filename="combined_plots.png"):
         handles = list(method_patches.values())
         
         # Determine the top margin offset depending on the grid layout height
-        bbox_anch = 0.98 if nrows <= 2 else 0.95 
+        bbox_anch = 0.97 if nrows <= 2 else 0.95 
         
-        fig.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, bbox_anch), ncol=len(labels), fontsize=12)
-        plt.tight_layout(rect=[0, 0, 1, bbox_anch - 0.05])
+        cols = (len(labels) + 1) // 2  
+
+        # fig.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, bbox_anch), ncol=len(labels), fontsize=17)
+        axes[0].legend(handles, labels, loc='upper left', ncol=cols, fontsize=18)
+        plt.tight_layout(rect=[0, 0, 1, bbox_anch - 0.08])
     else:
         plt.tight_layout()
         
@@ -291,10 +299,10 @@ def create_combined_plots_2(datasets, output_filename="combined_plots.png"):
 if __name__ == "__main__":
     # create_plots(data=data_generated_json_89mb, json_size="90MB")
 
-    # datasets_to_plot = [
-    #     (data_generated_json_89mb, "90MB"),
-    #     (data_generated_json_8mb, "8MB")
-    # ]
+    datasets_to_plot = [
+        (data_generated_json_89mb, "90MB"),
+        (data_generated_json_8mb, "8MB")
+    ]
     
     # create_combined_plots(datasets_to_plot, output_filename="plot_combined_90mb_8mb.png")
 
