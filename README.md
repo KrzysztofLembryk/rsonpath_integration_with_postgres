@@ -72,7 +72,7 @@ COPY json_table(data) FROM '/tmp/file.json';
 cargo pgrx run --release
 
 # create our extension functions in postgres
-rsonpath_postgres_ext=# CREATE EXTENSION rsonpath_postgres_ext;
+rsonpath_postgres_ext= CREATE EXTENSION rsonpath_postgres_ext;
 ```
 
 ```sql
