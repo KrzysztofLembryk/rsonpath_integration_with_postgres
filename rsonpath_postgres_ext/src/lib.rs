@@ -96,6 +96,7 @@ fn rsonpath_ext_json_timed(
     return TableIterator::new(results_iter);
 }
 
+// poc - rsonpath doesn't support jsonb yet, so we need to cast it to string
 #[pg_extern(immutable, parallel_safe)]
 fn rsonpath_ext_jsonb(
     query: &str, 
@@ -138,20 +139,20 @@ fn run_qeury(query: &str, json_str: &str) -> Vec<Match>
 }
 
 
-fn check_if_subjson_exists(json_str: &str, query: &str) -> bool
-{
-    let query = rsonpath_syntax::parse(query).expect("query parse error");
-    let input = BorrowedBytes::new(json_str.as_bytes());
-    let engine = RsonpathEngine::compile_query(&query).expect("engine compile error");
+// fn check_if_subjson_exists(json_str: &str, query: &str) -> bool
+// {
+//     let query = rsonpath_syntax::parse(query).expect("query parse error");
+//     let input = BorrowedBytes::new(json_str.as_bytes());
+//     let engine = RsonpathEngine::compile_query(&query).expect("engine compile error");
 
-    return engine.count(&input).expect("engine count error") as i64 > 0;
-}
+//     return engine.count(&input).expect("engine count error") as i64 > 0;
+// }
 
-#[pg_extern(immutable, parallel_safe, strict)] 
-#[opname(@@)] 
-fn rsonpath_contains(json_str: &str,query: &str) -> bool {
-    return check_if_subjson_exists(json_str, query);
-}
+// #[pg_extern(immutable, parallel_safe, strict)] 
+// #[opname(@@)] 
+// fn rsonpath_contains(json_str: &str,query: &str) -> bool {
+//     return check_if_subjson_exists(json_str, query);
+// }
 
 
 #[cfg(any(test, feature = "pg_test"))]
