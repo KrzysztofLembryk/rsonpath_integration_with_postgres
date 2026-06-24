@@ -109,15 +109,13 @@ def create_plots(data, json_size):
         plt.close()
 
 def create_combined_plots(datasets, output_filename="combined_plots.png"):
-    # Create a 2x2 grid of subplots
     fig, axes = plt.subplots(nrows=len(datasets), ncols=2, figsize=(16, 12))
     axes = axes.flatten()
     
     plt.style.use('ggplot')
     
-    # Define consistent colors for the methods
     colors = ['#348ABD', '#7A68A6', '#A60628', '#467821']
-    method_patches = {}  # for building a stable legend later
+    method_patches = {} 
 
     plot_idx = 0
     for data, json_size in datasets:
@@ -134,13 +132,10 @@ def create_combined_plots(datasets, output_filename="combined_plots.png"):
                 
             ax = axes[plot_idx]
             
-            # Filter data for specific query, sort to keep bar ordering consistent if needed
             subset = df[df['query_name'] == query].sort_values(by='avg_ms')
             
-            # Assign colors dynamically based on their position or enforce specific order
             bars = ax.bar(subset['method'], subset['avg_ms'], color=colors[:len(subset)])
             
-            # Save patches for the legend
             for bar, method in zip(bars, subset['method']):
                 if method not in method_patches:
                     method_patches[method] = bar
@@ -161,23 +156,19 @@ def create_combined_plots(datasets, output_filename="combined_plots.png"):
                             textcoords="offset points",
                             ha='center', va='bottom', fontsize=16)
             
-            # Remove the X-axis names/ticks completely
             ax.set_xticks([])
             ax.set_xlabel('')
             
             plot_idx += 1
             
-    # Remove any unused axes
     for i in range(plot_idx, len(axes)):
         fig.delaxes(axes[i])
 
-    # Add a unified legend at the top or bottom of the entire figure
     if method_patches:
         labels = list(method_patches.keys())
         handles = list(method_patches.values())
         fig.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, 0.98), ncol=len(labels), fontsize=18)
         
-        # Adjust layout so title/legend doesn't overlap the subplots
         plt.tight_layout(rect=[0, 0, 1, 0.93])
     else:
         plt.tight_layout()
@@ -187,7 +178,6 @@ def create_combined_plots(datasets, output_filename="combined_plots.png"):
     plt.close()
 
 def create_combined_plots_2(datasets, output_filename="combined_plots.png"):
-    # First figure out how many plots we actually need
     total_plots = 0
     for data, _ in datasets:
         df = pd.read_csv(io.StringIO(data), sep='|')
@@ -195,7 +185,6 @@ def create_combined_plots_2(datasets, output_filename="combined_plots.png"):
         df['query_name'] = df['query_name'].str.strip()
         total_plots += len(df['query_name'].unique())
         
-    # Calculate grid size (at least 2 columns if more than 1 plot, otherwise 1 column)
     ncols = min(2, total_plots)
     nrows = (total_plots + ncols - 1) // ncols 
     
@@ -204,7 +193,6 @@ def create_combined_plots_2(datasets, output_filename="combined_plots.png"):
         
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(16, 6 * nrows), sharey=True)
     
-    # Normalize axes to always be a flat list even if it's 1x1
     if nrows == 1 and ncols == 1:
         axes = [axes]
     else:
@@ -212,16 +200,15 @@ def create_combined_plots_2(datasets, output_filename="combined_plots.png"):
     
     plt.style.use('ggplot')
     
-    # Map method names strictly to your chosen colors
     color_map = {
-        'jsonpath': '#467821',                    # Green
-        'rsonpath_ext_json': '#A60628',           # Red
-        'rsonpath_ext_str': '#7A68A6',            # Purple
-        'rsonpath_ext_count': '#348ABD',          # Blue
-        'jsonpath_gin_filter_only': "#84C414",    # Lighter green
-        'rsonpath_gin_filter_only': "#303D9B",    # Lighter red/orange
-        'jsonpath_gin': "#00D131",                # Medium green
-        'rsonpath_ext_count_gin': "#306C90"       # Lighter purple
+        'jsonpath': '#467821',
+        'rsonpath_ext_json': '#A60628',
+        'rsonpath_ext_str': '#7A68A6',
+        'rsonpath_ext_count': '#348ABD', 
+        'jsonpath_gin_filter_only': "#84C414",
+        'rsonpath_gin_filter_only': "#303D9B",
+        'jsonpath_gin': "#00D131",
+        'rsonpath_ext_count_gin': "#306C90"
     }
     method_patches = {}
 
@@ -241,8 +228,6 @@ def create_combined_plots_2(datasets, output_filename="combined_plots.png"):
             ax = axes[plot_idx]
             subset = df[df['query_name'] == query].sort_values(by='avg_ms')
             
-            # Map colors based on the dataframe column method values. 
-            # Fallback to grey if a new method appears that isn't mapped.
             bar_colors = [color_map.get(method, '#888888') for method in subset['method']]
             
             bars = ax.bar(subset['method'], subset['avg_ms'], color=bar_colors)
@@ -251,7 +236,6 @@ def create_combined_plots_2(datasets, output_filename="combined_plots.png"):
                 if method not in method_patches:
                     method_patches[method] = bar
 
-            # We use a linear scale if you want, but you mentioned log scale earlier.
             # ax.set_yscale('log')
             ax.set_yscale('linear')
             ax.margins(y=0.1) 
@@ -280,7 +264,6 @@ def create_combined_plots_2(datasets, output_filename="combined_plots.png"):
         labels = list(method_patches.keys())
         handles = list(method_patches.values())
         
-        # Determine the top margin offset depending on the grid layout height
         bbox_anch = 0.97 if nrows <= 2 else 0.95 
         
         cols = (len(labels) + 1) // 2  

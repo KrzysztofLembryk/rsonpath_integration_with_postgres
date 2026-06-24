@@ -48,6 +48,7 @@ def generate_jsonl():
     """
     Generates a JSONL file where each line is a separate JSON object.
     1 in 10 records will have a "hobby" key with a list of hobbies,
+    Generated jsons are small, a few KB
     """
     print("###########################################")
     print("######## RUNNING generate_jsonl ###########")
@@ -151,6 +152,17 @@ def generate_jsonl_with_1MB_jsons_per_row():
     print(f"Generated JSONL {OUTPUT_FILE_JSONL} ({bytes_written} bytes, {size_mb:.1f} MB)")
 
 def generate_json():
+    """
+    Generates one big json:
+    {
+        "records": [
+            json1,
+            json2,
+            ... 
+        ]
+    }     
+    """
+
     print("###########################################")
     print("######### RUNNING generate_json ###########")
     print("###########################################")
