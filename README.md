@@ -1,4 +1,26 @@
-# rsonpath integration with Postgres repo
+# "Integrating rsonpath with PostgreSQL: A Research Report"
+
+## Abstract
+This project investigates the feasibility and performance of integrating the SIMD-accelerated
+JSONPath engine, rsonpath, with PostgreSQL through a Rust extension built using pgrx. We imple-
+mented several extension variants and a simple GIN operator class that enables index-assisted filter-
+ing of candidate rows. The resulting system was evaluated against PostgreSQL’s native JSONPath
+implementation on datasets ranging from single JSON documents of up to 90 MB to multi-gigabyte
+JSONL collections containing millions of records.
+Our experiments show that rsonpath substantially outperforms PostgreSQL’s native JSONPath
+on large documents, achieving speedups of up to 745x for highly selective path queries while also
+handling JSON inputs significantly larger than those accepted by PostgreSQL’s jsonb representa-
+tion. However, this advantage decreases with workloads consisting of many small documents, where
+PostgreSQL’s built-in implementation benefits from lower per-row overhead and direct access to the
+jsonb format. Profiling reveals that PostgreSQL infrastructure costs, particularly data decompres-
+sion and data movement, dominate execution time when rsonpath is used through an extension,
+which is especially evident when working with millions of small files.
+These results demonstrate that the rsonpath extension can provide dramatic benefits for large-
+document workloads in PostgreSQL, whereas for multi-gigabyte JSONL collections with smaller files,
+some work still needs to be done to achieve competitive performance compared to PostgreSQL’s
+native JSONPath
+
+# Rsonpath integration with PostgreSQL
 
 - rsonpath repo: https://github.com/rsonquery/rsonpath
     - for cli use: ```cargo install rsonpath```
